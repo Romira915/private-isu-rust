@@ -11,7 +11,7 @@ Rustで起動するためには以下の手順が必要です．
 
 ```sh
 cd private-isu/webapp
-git clone https://github.com/Romira915/private-isu-rust.git
+git clone https://github.com/Romira915/private-isu-rust.git rust
 ```
 
 2. `docker-compose.yml`のapp.buildを`rust`に変更する．
