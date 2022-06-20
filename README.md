@@ -16,9 +16,14 @@ git clone https://github.com/Romira915/private-isu-rust.git rust
 
 2. `webapp/docker-compose.yml`のapp.buildを`rust`に変更する．
 
-3. `webapp/docker-compose.yml`のmysqlに以下を追加する．これは使用しているcrateの`sqlx`がビルド時にデータベースにアクセス可能な状態である必要があるからです．
+3. `webapp/docker-compose.yml`のappとmysqlに以下を追加する．これは使用しているcrateの`sqlx`がビルド時にデータベースにアクセス可能な状態である必要があるからです．
 
 ```webapp/docker-compose.yml
+app:
+  depends_on:
+     mysql:
+       condition: service_healthy
+       
 mysql:
   healthcheck:
     test: mysqladmin ping -h 127.0.0.1 -u$$MYSQL_USER -p$$MYSQL_PASSWORD
