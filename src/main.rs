@@ -16,7 +16,7 @@ use actix_web::{
 use anyhow::{bail, Context};
 use chrono::{DateTime, FixedOffset, Utc};
 use derive_more::Constructor;
-use duct::cmd;
+
 use futures_util::TryStreamExt;
 use handlebars::{handlebars_helper, to_json, Handlebars};
 use log::LevelFilter;
