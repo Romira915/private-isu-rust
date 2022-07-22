@@ -7,16 +7,18 @@
 
 Rustで起動するためには以下の手順が必要です．
 
-1. private-isuのwebappに本リポジトリを追加する．
+1. private-isuの[README.md](https://github.com/catatsuy/private-isu/blob/master/README.md#docker-compose)に従って，MySQLに初期データをimportする．
+
+2. private-isuのwebappに本リポジトリを追加する．
 
 ```sh
-cd private-isu/webapp
+cd webapp
 git clone https://github.com/Romira915/private-isu-rust.git rust
 ```
 
-2. `webapp/docker-compose.yml`のapp.buildを`rust`に変更する．
+3. `webapp/docker-compose.yml`のapp.buildを`rust`に変更する．
 
-3. `webapp/docker-compose.yml`のappとmysqlに以下を追加する．これは使用しているcrateの`sqlx`がビルド時にデータベースにアクセス可能な状態である必要があるからです．
+4. `webapp/docker-compose.yml`のappとmysqlに以下を追加する．これは使用しているcrateの`sqlx`がビルド時にデータベースにアクセス可能な状態である必要があるからです．
 
 ```webapp/docker-compose.yml
 app:
@@ -33,5 +35,9 @@ mysql:
     start_period: 5s
 ```
 
-4. private-isuの[README.md](https://github.com/catatsuy/private-isu/blob/master/README.md)のDocker Composeの起動方法に従って実行してください．
+5. 起動する
 
+```sh
+cd webapp
+docker compose up
+```
