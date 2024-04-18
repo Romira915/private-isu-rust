@@ -1282,8 +1282,8 @@ async fn main() -> io::Result<()> {
     let num_cpus = num_cpus::get();
 
     let db = sqlx::mysql::MySqlPoolOptions::new()
-        .max_connections(num_cpus as u32)
-        .connect_timeout(Duration::from_secs(1))
+        .max_connections(24)
+        .connect_timeout(Duration::from_secs(30))
         .connect(&dsn)
         .await
         .unwrap();

@@ -1,4 +1,4 @@
-FROM rust:1.61.0
+FROM rust:1.77.2
 
 WORKDIR /home/webapp
 
