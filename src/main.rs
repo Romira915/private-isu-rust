@@ -934,7 +934,7 @@ async fn post_index(
     };
 
     let mut file = Vec::new();
-    let mut mime = String::new();
+    let mut mime_ = String::new();
     let mut body = String::new();
     let mut csrf_token = String::new();
 
@@ -945,31 +945,38 @@ async fn post_index(
         log::debug!("{:#?}", field.headers());
         match field.name() {
             "file" => {
-                let content_type = field.content_type().to_string();
-                log::debug!("content_type {}", &content_type);
-                if content_type.starts_with("image/") {
-                    if let "image/jpeg" | "image/png" | "image/gif" = field.content_type().as_ref()
-                    {
+                let content_type = field.content_type();
+                log::debug!("content_type {:?}", &content_type);
+                match content_type {
+                    Some(mime) if mime == &mime::IMAGE_JPEG || mime == &mime::IMAGE_PNG || mime == &mime::IMAGE_GIF => {
                         log::debug!("This is image");
-                        mime = content_type;
+                        mime_ = mime.to_string();
                         file = field_to_vec(&mut field).await.unwrap_or_default();
-                    } else if let Err(e) =
-                        session.insert("notice", "投稿できる画像形式はjpgとpngとgifだけです")
-                    {
-                        log::error!("{:?}", &e);
-                        return Ok(HttpResponse::InternalServerError().body(e.to_string()));
-                    } else {
-                        return Ok(HttpResponse::Found()
-                            .insert_header((header::LOCATION, "/"))
-                            .finish());
                     }
-                } else if let Err(e) = session.insert("notice", "画像が必須です") {
-                    log::error!("{:?}", &e);
-                    return Ok(HttpResponse::InternalServerError().body(e.to_string()));
-                } else {
-                    return Ok(HttpResponse::Found()
-                        .insert_header((header::LOCATION, "/"))
-                        .finish());
+                    Some(mime) if mime.type_() == mime::IMAGE => {
+                        return match session
+                            .insert("notice", "投稿できる画像形式はjpgとpngとgifだけです")
+                        {
+                            Ok(_) => Ok(HttpResponse::Found()
+                                .insert_header((header::LOCATION, "/"))
+                                .finish()),
+                            Err(e) => {
+                                log::error!("{:?}", &e);
+                                Ok(HttpResponse::InternalServerError().body(e.to_string()))
+                            }
+                        }
+                    }
+                    _ => {
+                       return match session.insert("notice", "画像が必須です") {
+                            Ok(_) => Ok(HttpResponse::Found()
+                                .insert_header((header::LOCATION, "/"))
+                                .finish()),
+                            Err(e) => {
+                                log::error!("{:?}", &e);
+                                Ok(HttpResponse::InternalServerError().body(e.to_string()))
+                            }
+                        }
+                    }
                 }
             }
             "body" => {
@@ -1004,7 +1011,7 @@ async fn post_index(
     let pid = match sqlx::query!(
         "INSERT INTO `posts` (`user_id`, `mime`, `imgdata`, `body`) VALUES (?,?,?,?)",
         me.id,
-        &mime,
+        &mime_,
         &file,
         &body
     )
@@ -1283,7 +1290,7 @@ async fn main() -> io::Result<()> {
 
     let db = sqlx::mysql::MySqlPoolOptions::new()
         .max_connections(24)
-        .connect_timeout(Duration::from_secs(30))
+        .acquire_timeout(Duration::from_secs(30))
         .connect(&dsn)
         .await
         .unwrap();
