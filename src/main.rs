@@ -4,7 +4,8 @@ use actix_cors::Cors;
 use actix_files::Files;
 use actix_multipart::{Field, Multipart};
 
-use actix_session::{CookieSession, Session};
+use actix_session::{Session, SessionMiddleware};
+use actix_session::storage::{CookieSessionStore};
 use actix_web::{
     cookie::time::UtcOffset,
     get,
@@ -948,7 +949,11 @@ async fn post_index(
                 let content_type = field.content_type();
                 log::debug!("content_type {:?}", &content_type);
                 match content_type {
-                    Some(mime) if mime == &mime::IMAGE_JPEG || mime == &mime::IMAGE_PNG || mime == &mime::IMAGE_GIF => {
+                    Some(mime)
+                        if mime == &mime::IMAGE_JPEG
+                            || mime == &mime::IMAGE_PNG
+                            || mime == &mime::IMAGE_GIF =>
+                    {
                         log::debug!("This is image");
                         mime_ = mime.to_string();
                         file = field_to_vec(&mut field).await.unwrap_or_default();
@@ -967,7 +972,7 @@ async fn post_index(
                         }
                     }
                     _ => {
-                       return match session.insert("notice", "画像が必須です") {
+                        return match session.insert("notice", "画像が必須です") {
                             Ok(_) => Ok(HttpResponse::Found()
                                 .insert_header((header::LOCATION, "/"))
                                 .finish()),
@@ -1286,6 +1291,8 @@ async fn main() -> io::Result<()> {
         )
     };
 
+    let memcached_address = env::var("ISUCONP_MEMCACHED_ADDRESS").unwrap_or_else(|_| "localhost:11211".to_string());
+
     let num_cpus = num_cpus::get();
 
     let db = sqlx::mysql::MySqlPoolOptions::new()
@@ -1314,7 +1321,8 @@ async fn main() -> io::Result<()> {
                     .supports_credentials()
                     .allowed_origin("http://localhost")
             })
-            .wrap(CookieSession::signed(private_key.encryption()).secure(false))
+            // TODO: memcachedに対応する
+            .wrap(SessionMiddleware::new(CookieSessionStore::default(), private_key.clone()))
             .app_data(Data::new(db.clone()))
             .app_data(Data::new(handlebars))
             .service(get_initialize)
