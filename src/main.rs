@@ -4,8 +4,8 @@ use actix_cors::Cors;
 use actix_files::Files;
 use actix_multipart::{Field, Multipart};
 
+use actix_session::storage::CookieSessionStore;
 use actix_session::{Session, SessionMiddleware};
-use actix_session::storage::{CookieSessionStore};
 use actix_web::{
     cookie::time::UtcOffset,
     get,
@@ -19,7 +19,7 @@ use chrono::{DateTime, FixedOffset, Utc};
 use derive_more::Constructor;
 
 use futures_util::TryStreamExt;
-use handlebars::{handlebars_helper, to_json, Handlebars};
+use handlebars::{handlebars_helper, to_json, DirectorySourceOptions, Handlebars};
 use log::LevelFilter;
 use once_cell::sync::Lazy;
 use rand::{
@@ -1291,7 +1291,8 @@ async fn main() -> io::Result<()> {
         )
     };
 
-    let memcached_address = env::var("ISUCONP_MEMCACHED_ADDRESS").unwrap_or_else(|_| "localhost:11211".to_string());
+    let memcached_address =
+        env::var("ISUCONP_MEMCACHED_ADDRESS").unwrap_or_else(|_| "localhost:11211".to_string());
 
     let num_cpus = num_cpus::get();
 
@@ -1308,8 +1309,12 @@ async fn main() -> io::Result<()> {
         let mut handlebars = Handlebars::new();
         handlebars.register_helper("image_url_helper", Box::new(image_url));
         handlebars.register_helper("date_time_format", Box::new(date_time_format));
+        let directory_source_options = DirectorySourceOptions {
+            tpl_extension: ".html".to_string(),
+            ..Default::default()
+        };
         handlebars
-            .register_templates_directory(".html", "./static")
+            .register_templates_directory("./static", directory_source_options)
             .unwrap();
 
         App::new()
@@ -1322,7 +1327,10 @@ async fn main() -> io::Result<()> {
                     .allowed_origin("http://localhost")
             })
             // TODO: memcachedに対応する
-            .wrap(SessionMiddleware::new(CookieSessionStore::default(), private_key.clone()))
+            .wrap(SessionMiddleware::new(
+                CookieSessionStore::default(),
+                private_key.clone(),
+            ))
             .app_data(Data::new(db.clone()))
             .app_data(Data::new(handlebars))
             .service(get_initialize)
