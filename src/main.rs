@@ -137,7 +137,7 @@ struct PostsQuery {
 
 async fn field_to_vec(field: &mut Field) -> anyhow::Result<Vec<u8>> {
     let mut b = Vec::new();
-    while let Some(chunk) = field.try_next().await? {
+    while let Ok(Some(chunk)) = field.try_next().await {
         b.append(&mut chunk.to_vec());
     }
 
