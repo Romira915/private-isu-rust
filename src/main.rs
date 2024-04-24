@@ -4,7 +4,8 @@ use actix_cors::Cors;
 use actix_files::Files;
 use actix_multipart::{Field, Multipart};
 
-use actix_session::{CookieSession, Session};
+use actix_session::storage::CookieSessionStore;
+use actix_session::{Session, SessionMiddleware};
 use actix_web::{
     cookie::time::UtcOffset,
     get,
@@ -18,7 +19,7 @@ use chrono::{DateTime, FixedOffset, Utc};
 use derive_more::Constructor;
 
 use futures_util::TryStreamExt;
-use handlebars::{handlebars_helper, to_json, Handlebars};
+use handlebars::{handlebars_helper, to_json, DirectorySourceOptions, Handlebars};
 use log::LevelFilter;
 use once_cell::sync::Lazy;
 use rand::{
@@ -137,7 +138,7 @@ struct PostsQuery {
 
 async fn field_to_vec(field: &mut Field) -> anyhow::Result<Vec<u8>> {
     let mut b = Vec::new();
-    while let Some(chunk) = field.try_next().await? {
+    while let Ok(Some(chunk)) = field.try_next().await {
         b.append(&mut chunk.to_vec());
     }
 
@@ -934,7 +935,7 @@ async fn post_index(
     };
 
     let mut file = Vec::new();
-    let mut mime = String::new();
+    let mut mime_ = String::new();
     let mut body = String::new();
     let mut csrf_token = String::new();
 
@@ -945,31 +946,42 @@ async fn post_index(
         log::debug!("{:#?}", field.headers());
         match field.name() {
             "file" => {
-                let content_type = field.content_type().to_string();
-                log::debug!("content_type {}", &content_type);
-                if content_type.starts_with("image/") {
-                    if let "image/jpeg" | "image/png" | "image/gif" = field.content_type().as_ref()
+                let content_type = field.content_type();
+                log::debug!("content_type {:?}", &content_type);
+                match content_type {
+                    Some(mime)
+                        if mime == &mime::IMAGE_JPEG
+                            || mime == &mime::IMAGE_PNG
+                            || mime == &mime::IMAGE_GIF =>
                     {
                         log::debug!("This is image");
-                        mime = content_type;
+                        mime_ = mime.to_string();
                         file = field_to_vec(&mut field).await.unwrap_or_default();
-                    } else if let Err(e) =
-                        session.insert("notice", "投稿できる画像形式はjpgとpngとgifだけです")
-                    {
-                        log::error!("{:?}", &e);
-                        return Ok(HttpResponse::InternalServerError().body(e.to_string()));
-                    } else {
-                        return Ok(HttpResponse::Found()
-                            .insert_header((header::LOCATION, "/"))
-                            .finish());
                     }
-                } else if let Err(e) = session.insert("notice", "画像が必須です") {
-                    log::error!("{:?}", &e);
-                    return Ok(HttpResponse::InternalServerError().body(e.to_string()));
-                } else {
-                    return Ok(HttpResponse::Found()
-                        .insert_header((header::LOCATION, "/"))
-                        .finish());
+                    Some(mime) if mime.type_() == mime::IMAGE => {
+                        return match session
+                            .insert("notice", "投稿できる画像形式はjpgとpngとgifだけです")
+                        {
+                            Ok(_) => Ok(HttpResponse::Found()
+                                .insert_header((header::LOCATION, "/"))
+                                .finish()),
+                            Err(e) => {
+                                log::error!("{:?}", &e);
+                                Ok(HttpResponse::InternalServerError().body(e.to_string()))
+                            }
+                        }
+                    }
+                    _ => {
+                        return match session.insert("notice", "画像が必須です") {
+                            Ok(_) => Ok(HttpResponse::Found()
+                                .insert_header((header::LOCATION, "/"))
+                                .finish()),
+                            Err(e) => {
+                                log::error!("{:?}", &e);
+                                Ok(HttpResponse::InternalServerError().body(e.to_string()))
+                            }
+                        }
+                    }
                 }
             }
             "body" => {
@@ -1004,7 +1016,7 @@ async fn post_index(
     let pid = match sqlx::query!(
         "INSERT INTO `posts` (`user_id`, `mime`, `imgdata`, `body`) VALUES (?,?,?,?)",
         me.id,
-        &mime,
+        &mime_,
         &file,
         &body
     )
@@ -1279,11 +1291,14 @@ async fn main() -> io::Result<()> {
         )
     };
 
+    let memcached_address =
+        env::var("ISUCONP_MEMCACHED_ADDRESS").unwrap_or_else(|_| "localhost:11211".to_string());
+
     let num_cpus = num_cpus::get();
 
     let db = sqlx::mysql::MySqlPoolOptions::new()
         .max_connections(24)
-        .connect_timeout(Duration::from_secs(30))
+        .acquire_timeout(Duration::from_secs(30))
         .connect(&dsn)
         .await
         .unwrap();
@@ -1294,8 +1309,12 @@ async fn main() -> io::Result<()> {
         let mut handlebars = Handlebars::new();
         handlebars.register_helper("image_url_helper", Box::new(image_url));
         handlebars.register_helper("date_time_format", Box::new(date_time_format));
+        let directory_source_options = DirectorySourceOptions {
+            tpl_extension: ".html".to_string(),
+            ..Default::default()
+        };
         handlebars
-            .register_templates_directory(".html", "./static")
+            .register_templates_directory("./static", directory_source_options)
             .unwrap();
 
         App::new()
@@ -1307,7 +1326,11 @@ async fn main() -> io::Result<()> {
                     .supports_credentials()
                     .allowed_origin("http://localhost")
             })
-            .wrap(CookieSession::signed(private_key.encryption()).secure(false))
+            // TODO: memcachedに対応する
+            .wrap(SessionMiddleware::new(
+                CookieSessionStore::default(),
+                private_key.clone(),
+            ))
             .app_data(Data::new(db.clone()))
             .app_data(Data::new(handlebars))
             .service(get_initialize)
