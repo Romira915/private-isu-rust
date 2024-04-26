@@ -1,14 +1,11 @@
 use std::collections::HashMap;
-use std::future::Future;
 use std::{env, io, time::Duration};
 
 use actix_cors::Cors;
 use actix_files::Files;
 use actix_multipart::{Field, Multipart};
 
-use actix_session::storage::{
-    CookieSessionStore, LoadError, SaveError, SessionKey, SessionStore, UpdateError,
-};
+use actix_session::storage::{LoadError, SaveError, SessionKey, SessionStore, UpdateError};
 use actix_session::{Session, SessionMiddleware};
 use actix_web::{
     get,
@@ -161,8 +158,11 @@ impl SessionStore for MemcachedSessionStore {
             .context("Failed to load session")
         {
             Ok(Some(value)) => {
-                todo!()
-            },
+                match serde_json::from_str(&value).context("Failed to load session") {
+                    Ok(state) => Ok(Some(state)),
+                    Err(e) => Err(LoadError::Deserialization(e)),
+                }
+            }
             Ok(None) => Ok(None),
             Err(e) => Err(LoadError::Other(e)),
         }
@@ -173,8 +173,25 @@ impl SessionStore for MemcachedSessionStore {
         session_state: HashMap<String, String>,
         ttl: &actix_web::cookie::time::Duration,
     ) -> Result<SessionKey, SaveError> {
-        let session_key: SessionKey = secure_random_str(SESSION_KEY_LENGTH).try_into().expect("Failed to save session");
-        todo!()
+        let session_key: SessionKey = secure_random_str(SESSION_KEY_LENGTH)
+            .try_into()
+            .expect("Failed to save session");
+
+        let session_state_json =
+            serde_json::to_string(&session_state).expect("Failed to save session");
+
+        match self
+            .memcache_client
+            .set(
+                session_key.as_ref(),
+                &session_state_json,
+                ttl.as_seconds_f64() as u32,
+            )
+            .context("Failed to save session")
+        {
+            Ok(_) => Ok(session_key),
+            Err(e) => Err(SaveError::Other(e)),
+        }
     }
 
     async fn update(
@@ -183,7 +200,18 @@ impl SessionStore for MemcachedSessionStore {
         session_state: HashMap<String, String>,
         ttl: &actix_web::cookie::time::Duration,
     ) -> Result<SessionKey, UpdateError> {
-        todo!()
+        match self
+            .memcache_client
+            .set(
+                session_key.as_ref(),
+                &serde_json::to_string(&session_state).expect("Failed to update session"),
+                ttl.as_seconds_f64() as u32,
+            )
+            .context("Failed to update session")
+        {
+            Ok(_) => Ok(session_key),
+            Err(e) => Err(UpdateError::Other(e)),
+        }
     }
 
     async fn update_ttl(
@@ -191,11 +219,25 @@ impl SessionStore for MemcachedSessionStore {
         session_key: &SessionKey,
         ttl: &actix_web::cookie::time::Duration,
     ) -> Result<(), Error> {
-        todo!()
+        match self
+            .memcache_client
+            .touch(session_key.as_ref(), ttl.as_seconds_f64() as u32)
+            .context("Failed to update_ttl")
+        {
+            Ok(_) => Ok(()),
+            Err(e) => Err(e),
+        }
     }
 
-    async fn delete(&self, session_key: &SessionKey) -> Result<(), anyhow::Error> {
-        todo!()
+    async fn delete(&self, session_key: &SessionKey) -> Result<(), Error> {
+        match self
+            .memcache_client
+            .delete(session_key.as_ref())
+            .context("Failed to delete")
+        {
+            Ok(_) => Ok(()),
+            Err(e) => Err(e),
+        }
     }
 }
 
@@ -1258,8 +1300,8 @@ async fn main() -> io::Result<()> {
     let private_key = actix_web::cookie::Key::generate();
 
     HttpServer::new(move || {
-        let memcached_address = env::var("ISUCONP_MEMCACHED_ADDRESS")
-            .unwrap_or_else(|_| "memcache://localhost:11211".to_string());
+        let memcached_address = format!("memcache://{}", env::var("ISUCONP_MEMCACHED_ADDRESS")
+            .unwrap_or_else(|_| "localhost:11211".to_string()));
 
         let mut handlebars = Handlebars::new();
         handlebars.register_helper("image_url_helper", Box::new(image_url));
