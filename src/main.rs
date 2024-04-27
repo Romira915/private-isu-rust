@@ -5,8 +5,10 @@ use actix_cors::Cors;
 use actix_files::Files;
 use actix_multipart::{Field, Multipart};
 
+use actix_session::config::PersistentSession;
 use actix_session::storage::{LoadError, SaveError, SessionKey, SessionStore, UpdateError};
 use actix_session::{Session, SessionMiddleware};
+use actix_web::cookie::SameSite;
 use actix_web::{
     get,
     http::header,
@@ -34,6 +36,7 @@ use sqlx::{MySql, Pool};
 const POSTS_PER_PAGE: usize = 20;
 const UPLOAD_LIMIT: usize = 10 * 1024 * 1024;
 const SESSION_KEY_LENGTH: u32 = 32;
+const SESSION_TTL: i64 = 60 * 60 * 24 * 30;
 static AGGREGATION_LOWER_CASE_NUM: Lazy<Vec<char>> = Lazy::new(|| {
     let mut az09 = Vec::new();
     for az in 'a' as u32..('z' as u32 + 1) {
@@ -184,7 +187,7 @@ impl SessionStore for MemcachedSessionStore {
             .memcache_client
             .set(
                 session_key.as_ref(),
-                &session_state_json,
+                session_state_json,
                 ttl.as_seconds_f64() as u32,
             )
             .context("Failed to save session")
@@ -204,7 +207,7 @@ impl SessionStore for MemcachedSessionStore {
             .memcache_client
             .set(
                 session_key.as_ref(),
-                &serde_json::to_string(&session_state).expect("Failed to update session"),
+                serde_json::to_string(&session_state).expect("Failed to update session"),
                 ttl.as_seconds_f64() as u32,
             )
             .context("Failed to update session")
@@ -353,7 +356,6 @@ fn get_flash(session: &Session, key: &str) -> Option<String> {
             session.remove(key);
             value
         }
-        Err(_) => None,
         _ => None,
     }
 }
@@ -451,12 +453,8 @@ handlebars_helper!(date_time_format: |create_at: DateTime<Utc>| {
     create_at.format("%Y-%m-%dT%H:%M:%S-07:00").to_string()
 });
 
-// NOTE: idが0ならみたいなことしてるけどせっかくOptionがあるからこっちで判定したい
 fn is_login(u: Option<&User>) -> bool {
-    match u {
-        Some(u) => u.id != 0,
-        None => false,
-    }
+    u.is_some()
 }
 
 fn get_csrf_token(session: &Session) -> Option<String> {
@@ -542,7 +540,7 @@ async fn post_login(
         Err(_) => {
             session
                 .insert("notice", "アカウント名かパスワードが間違っています")
-                .unwrap();
+                .expect("Failed to insert notice");
 
             Ok(HttpResponse::Found()
                 .insert_header((header::LOCATION, "/login"))
@@ -692,10 +690,10 @@ async fn get_index(
         }
     };
 
-    let results = match sqlx::query_as!(Post,"SELECT `id`, `user_id`, `body`, `mime`, `created_at`, b'0' AS imgdata FROM `posts` ORDER BY `created_at` DESC").fetch_all(pool.as_ref()).await {
+    let results = match sqlx::query_as!(Post, "SELECT `id`, `user_id`, `body`, `mime`, `created_at`, b'0' AS imgdata FROM `posts` ORDER BY `created_at` DESC").fetch_all(pool.as_ref()).await {
         Ok(results) => results,
         Err(e) => {
-            return Ok(HttpResponse::Ok().body(e.to_string()));
+            return Ok(HttpResponse::InternalServerError().body(e.to_string()));
         }
     };
 
@@ -704,7 +702,7 @@ async fn get_index(
     let posts = match make_post(results, csrf_token, false, pool.as_ref()).await {
         Ok(posts) => posts,
         Err(e) => {
-            return Ok(HttpResponse::Ok().body(e.to_string()));
+            return Ok(HttpResponse::InternalServerError().body(e.to_string()));
         }
     };
 
@@ -1053,13 +1051,12 @@ async fn post_index(
     }
 
     if file.len() > UPLOAD_LIMIT {
-        if let Err(e) = session.insert("notice", "ファイルサイズが大きすぎます") {
-            return Ok(HttpResponse::InternalServerError().body(e.to_string()));
-        } else {
-            return Ok(HttpResponse::Found()
+        return match session.insert("notice", "ファイルサイズが大きすぎます") {
+            Ok(_) => Ok(HttpResponse::Found()
                 .insert_header((header::LOCATION, "/"))
-                .finish());
-        }
+                .finish()),
+            Err(e) => Ok(HttpResponse::InternalServerError().body(e.to_string())),
+        };
     }
 
     let pid = match sqlx::query!(
@@ -1133,8 +1130,14 @@ async fn post_comment(
         }
     };
 
-    if params.csrf_token != get_csrf_token(&session).unwrap_or_default() {
-        return Ok(HttpResponse::UnprocessableEntity().finish());
+    let csrf_token = get_csrf_token(&session);
+
+    match csrf_token {
+        Some(csrf_token) if csrf_token != params.csrf_token => {
+            return Ok(HttpResponse::UnprocessableEntity().finish());
+        }
+        None => return Ok(HttpResponse::UnprocessableEntity().finish()),
+        _ => (),
     }
 
     if let Err(e) = sqlx::query!(
@@ -1300,8 +1303,10 @@ async fn main() -> io::Result<()> {
     let private_key = actix_web::cookie::Key::generate();
 
     HttpServer::new(move || {
-        let memcached_address = format!("memcache://{}", env::var("ISUCONP_MEMCACHED_ADDRESS")
-            .unwrap_or_else(|_| "localhost:11211".to_string()));
+        let memcached_address = format!(
+            "memcache://{}",
+            env::var("ISUCONP_MEMCACHED_ADDRESS").unwrap_or_else(|_| "localhost:11211".to_string())
+        );
 
         let mut handlebars = Handlebars::new();
         handlebars.register_helper("image_url_helper", Box::new(image_url));
@@ -1323,11 +1328,20 @@ async fn main() -> io::Result<()> {
                     .supports_credentials()
                     .allowed_origin("http://localhost")
             })
-            // TODO: memcachedに対応する
-            .wrap(SessionMiddleware::new(
-                MemcachedSessionStore::new(memcached_address).unwrap(),
-                private_key.clone(),
-            ))
+            .wrap(
+                SessionMiddleware::builder(
+                    MemcachedSessionStore::new(memcached_address).unwrap(),
+                    private_key.clone(),
+                )
+                // NOTE: http://host.docker.internalで接続できる必要があるのでfalse
+                .cookie_secure(false)
+                .session_lifecycle(
+                    PersistentSession::default()
+                        .session_ttl(actix_web::cookie::time::Duration::seconds(SESSION_TTL)),
+                )
+                    .cookie_name("isuconp-rust.session".to_string())
+                .build(),
+            )
             .app_data(Data::new(db.clone()))
             .app_data(Data::new(handlebars))
             .service(get_initialize)
