@@ -1,0 +1,12 @@
+{
+  "db_name": "MySQL",
+  "query": "DELETE FROM users WHERE id > 1000",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": []
+  },
+  "hash": "b9ed8d99b222a80e74b6d1739a4544de4f4c62cab660227bac8d8662b14f44ea"
+}

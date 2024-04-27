@@ -1,0 +1,12 @@
+{
+  "db_name": "MySQL",
+  "query": "DELETE FROM comments WHERE id > 100000",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": []
+  },
+  "hash": "24a13eeb22a420a4cf9205300346f6ae7f29ffbe51087d518331b3a453cd14f3"
+}

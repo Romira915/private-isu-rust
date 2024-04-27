@@ -1,0 +1,25 @@
+{
+  "db_name": "MySQL",
+  "query": "SELECT 1 AS _exists FROM users WHERE `account_name` = ?",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "_exists",
+        "type_info": {
+          "type": "LongLong",
+          "flags": "NOT_NULL | BINARY",
+          "char_set": 63,
+          "max_size": 2
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "10f8197113a659870402859eabd1909183ffc67b392aa4aacb5d20091a39265f"
+}

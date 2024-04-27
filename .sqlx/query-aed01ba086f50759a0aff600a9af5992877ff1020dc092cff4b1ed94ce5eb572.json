@@ -1,0 +1,12 @@
+{
+  "db_name": "MySQL",
+  "query": "UPDATE `users` SET `del_flg` = ? WHERE `id` = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "aed01ba086f50759a0aff600a9af5992877ff1020dc092cff4b1ed94ce5eb572"
+}

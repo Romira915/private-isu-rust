@@ -1,0 +1,12 @@
+{
+  "db_name": "MySQL",
+  "query": "INSERT INTO `comments` (`post_id`, `user_id`, `comment`) VALUES (?,?,?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "c1f1b59d91caa96bf523256d90a6a63feae9a82352cfb386b23cf8e848b1884b"
+}
