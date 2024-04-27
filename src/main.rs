@@ -1,26 +1,28 @@
-use std::{env, io, path::Path, time::Duration};
+use std::collections::HashMap;
+use std::{env, io, time::Duration};
 
 use actix_cors::Cors;
 use actix_files::Files;
 use actix_multipart::{Field, Multipart};
 
-use actix_session::storage::CookieSessionStore;
+use actix_session::config::PersistentSession;
+use actix_session::storage::{LoadError, SaveError, SessionKey, SessionStore, UpdateError};
 use actix_session::{Session, SessionMiddleware};
+use actix_web::cookie::SameSite;
 use actix_web::{
-    cookie::time::UtcOffset,
     get,
     http::header,
     middleware, post,
     web::{self, Data, Form, Payload},
     App, HttpResponse, HttpServer, Result,
 };
-use anyhow::{bail, Context};
-use chrono::{DateTime, FixedOffset, Utc};
+use anyhow::{bail, Context, Error};
+use chrono::{DateTime, Utc};
 use derive_more::Constructor;
 
 use futures_util::TryStreamExt;
 use handlebars::{handlebars_helper, to_json, DirectorySourceOptions, Handlebars};
-use log::LevelFilter;
+use memcache::Connectable;
 use once_cell::sync::Lazy;
 use rand::{
     prelude::{SliceRandom, StdRng},
@@ -29,13 +31,12 @@ use rand::{
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_json::Map;
-use simplelog::{
-    ColorChoice, CombinedLogger, ConfigBuilder, SharedLogger, TermLogger, TerminalMode, WriteLogger,
-};
 use sqlx::{MySql, Pool};
 
 const POSTS_PER_PAGE: usize = 20;
 const UPLOAD_LIMIT: usize = 10 * 1024 * 1024;
+const SESSION_KEY_LENGTH: u32 = 32;
+const SESSION_TTL: i64 = 60 * 60 * 24 * 30;
 static AGGREGATION_LOWER_CASE_NUM: Lazy<Vec<char>> = Lazy::new(|| {
     let mut az09 = Vec::new();
     for az in 'a' as u32..('z' as u32 + 1) {
@@ -136,6 +137,113 @@ struct PostsQuery {
     max_created_at: String,
 }
 
+struct MemcachedSessionStore {
+    memcache_client: memcache::Client,
+}
+
+impl MemcachedSessionStore {
+    fn new<C: Connectable>(connection_string: C) -> anyhow::Result<Self> {
+        Ok(Self {
+            memcache_client: memcache::Client::connect(connection_string)
+                .context("Failed to connect memcached")?,
+        })
+    }
+}
+
+impl SessionStore for MemcachedSessionStore {
+    async fn load(
+        &self,
+        session_key: &SessionKey,
+    ) -> Result<Option<HashMap<String, String>>, LoadError> {
+        match self
+            .memcache_client
+            .get::<String>(session_key.as_ref())
+            .context("Failed to load session")
+        {
+            Ok(Some(value)) => {
+                match serde_json::from_str(&value).context("Failed to load session") {
+                    Ok(state) => Ok(Some(state)),
+                    Err(e) => Err(LoadError::Deserialization(e)),
+                }
+            }
+            Ok(None) => Ok(None),
+            Err(e) => Err(LoadError::Other(e)),
+        }
+    }
+
+    async fn save(
+        &self,
+        session_state: HashMap<String, String>,
+        ttl: &actix_web::cookie::time::Duration,
+    ) -> Result<SessionKey, SaveError> {
+        let session_key: SessionKey = secure_random_str(SESSION_KEY_LENGTH)
+            .try_into()
+            .expect("Failed to save session");
+
+        let session_state_json =
+            serde_json::to_string(&session_state).expect("Failed to save session");
+
+        match self
+            .memcache_client
+            .set(
+                session_key.as_ref(),
+                session_state_json,
+                ttl.as_seconds_f64() as u32,
+            )
+            .context("Failed to save session")
+        {
+            Ok(_) => Ok(session_key),
+            Err(e) => Err(SaveError::Other(e)),
+        }
+    }
+
+    async fn update(
+        &self,
+        session_key: SessionKey,
+        session_state: HashMap<String, String>,
+        ttl: &actix_web::cookie::time::Duration,
+    ) -> Result<SessionKey, UpdateError> {
+        match self
+            .memcache_client
+            .set(
+                session_key.as_ref(),
+                serde_json::to_string(&session_state).expect("Failed to update session"),
+                ttl.as_seconds_f64() as u32,
+            )
+            .context("Failed to update session")
+        {
+            Ok(_) => Ok(session_key),
+            Err(e) => Err(UpdateError::Other(e)),
+        }
+    }
+
+    async fn update_ttl(
+        &self,
+        session_key: &SessionKey,
+        ttl: &actix_web::cookie::time::Duration,
+    ) -> Result<(), Error> {
+        match self
+            .memcache_client
+            .touch(session_key.as_ref(), ttl.as_seconds_f64() as u32)
+            .context("Failed to update_ttl")
+        {
+            Ok(_) => Ok(()),
+            Err(e) => Err(e),
+        }
+    }
+
+    async fn delete(&self, session_key: &SessionKey) -> Result<(), Error> {
+        match self
+            .memcache_client
+            .delete(session_key.as_ref())
+            .context("Failed to delete")
+        {
+            Ok(_) => Ok(()),
+            Err(e) => Err(e),
+        }
+    }
+}
+
 async fn field_to_vec(field: &mut Field) -> anyhow::Result<Vec<u8>> {
     let mut b = Vec::new();
     while let Ok(Some(chunk)) = field.try_next().await {
@@ -150,7 +258,7 @@ async fn db_initialize(pool: &Pool<MySql>) -> anyhow::Result<()> {
         .execute(pool)
         .await
         .context("Failed to db_initialize")?;
-    sqlx::query!("DELETE FROM posts WHERE id > 10000",)
+    sqlx::query!("DELETE FROM posts WHERE id > 10000")
         .execute(pool)
         .await
         .context("Failed to db_initialize")?;
@@ -214,7 +322,7 @@ fn validate_user(account_name: &str, password: &str) -> bool {
 #[get("/initialize")]
 async fn get_initialize(pool: Data<Pool<MySql>>) -> Result<HttpResponse> {
     if let Err(e) = db_initialize(&pool).await {
-        log::error!("{:?}", &e);
+        return Ok(HttpResponse::InternalServerError().body(e.to_string()));
     }
     Ok(HttpResponse::Ok().finish())
 }
@@ -238,7 +346,6 @@ async fn get_session_user(session: &Session, pool: &Pool<MySql>) -> anyhow::Resu
         .fetch_optional(pool)
         .await
         .context("Failed to get_session_user")?;
-    log::debug!("query user");
 
     Ok(user)
 }
@@ -248,10 +355,6 @@ fn get_flash(session: &Session, key: &str) -> Option<String> {
         Ok(Some(value)) => {
             session.remove(key);
             value
-        }
-        Err(e) => {
-            log::error!("{:?}", &e);
-            None
         }
         _ => None,
     }
@@ -306,7 +409,6 @@ async fn make_post(
             .await
             .context("Failed to query user")?
             .context("Not found user")?;
-            log::debug!("comment user {:?}", &user);
 
             granted_comments.push(GrantedUserComment::new(comment, user));
         }
@@ -318,7 +420,6 @@ async fn make_post(
             .await
             .context("Failed to query user")?
             .context("Not found user")?;
-        log::debug!("user {:?}", &user);
 
         if user.del_flg == 0 {
             granted_info_posts.push(GrantedInfoPost::new(
@@ -352,12 +453,8 @@ handlebars_helper!(date_time_format: |create_at: DateTime<Utc>| {
     create_at.format("%Y-%m-%dT%H:%M:%S-07:00").to_string()
 });
 
-// NOTE: idが0ならみたいなことしてるけどせっかくOptionがあるからこっちで判定したい
 fn is_login(u: Option<&User>) -> bool {
-    match u {
-        Some(u) => u.id != 0,
-        None => false,
-    }
+    u.is_some()
 }
 
 fn get_csrf_token(session: &Session) -> Option<String> {
@@ -398,10 +495,7 @@ async fn get_login(
                 User::default()
             }
         }
-        Err(e) => {
-            log::error!("{:?}", &e);
-            User::default()
-        }
+        Err(_) => User::default(),
     };
 
     let body = {
@@ -410,11 +504,9 @@ async fn get_login(
         map.insert("me".to_string(), to_json(user));
         map.insert("flash".to_string(), to_json(get_flash(&session, "notice")));
         map.insert("parent".to_string(), to_json("layout"));
-        log::debug!("{:?}", &map);
 
         handlebars.render("login", &map).unwrap()
     };
-    log::debug!("{:?}", &body);
 
     Ok(HttpResponse::Ok().body(body))
 }
@@ -433,7 +525,7 @@ async fn post_login(
                     .finish());
             }
         }
-        Err(e) => log::error!("{:?}", &e),
+        Err(e) => return Ok(HttpResponse::InternalServerError().body(e.to_string())),
     };
 
     match try_login(&params.account_name, &params.password, pool.as_ref()).await {
@@ -445,11 +537,10 @@ async fn post_login(
                 .insert_header((header::LOCATION, "/"))
                 .finish())
         }
-        Err(e) => {
-            log::info!("{:?}", &e);
+        Err(_) => {
             session
                 .insert("notice", "アカウント名かパスワードが間違っています")
-                .unwrap();
+                .expect("Failed to insert notice");
 
             Ok(HttpResponse::Found()
                 .insert_header((header::LOCATION, "/login"))
@@ -464,7 +555,6 @@ async fn get_register(
     pool: Data<Pool<MySql>>,
     handlebars: Data<Handlebars<'_>>,
 ) -> Result<HttpResponse> {
-    log::debug!("call get_register");
     match get_session_user(&session, pool.as_ref()).await {
         Ok(user) => {
             if is_login(user.as_ref()) {
@@ -473,10 +563,9 @@ async fn get_register(
                     .finish());
             }
         }
-        Err(e) => log::error!("{:?}", &e),
+        Err(e) => return Ok(HttpResponse::InternalServerError().body(e.to_string())),
     };
 
-    log::debug!("render template");
     let body = {
         let user = User::default();
 
@@ -485,12 +574,10 @@ async fn get_register(
         map.insert("me".to_string(), to_json(user));
         map.insert("flash".to_string(), to_json(get_flash(&session, "notice")));
         map.insert("parent".to_string(), to_json("layout"));
-        log::debug!("map {:?}", &map);
 
         handlebars.render("register", &map).unwrap()
     };
 
-    log::debug!("return ok");
     Ok(HttpResponse::Ok().body(body))
 }
 
@@ -508,7 +595,7 @@ async fn post_register(
                     .finish());
             }
         }
-        Err(e) => log::error!("{:?}", &e),
+        Err(e) => return Ok(HttpResponse::InternalServerError().body(e.to_string())),
     };
 
     let validated = validate_user(&params.account_name, &params.password);
@@ -517,7 +604,6 @@ async fn post_register(
             "notice",
             "アカウント名は3文字以上、パスワードは6文字以上である必要があります",
         ) {
-            log::error!("{:?}", &e);
             return Ok(HttpResponse::InternalServerError().body(e.to_string()));
         } else {
             return Ok(HttpResponse::Found()
@@ -535,7 +621,6 @@ async fn post_register(
     {
         Ok(exists) => exists,
         Err(e) => {
-            log::error!("{:?}", &e);
             return Ok(HttpResponse::InternalServerError().body(e.to_string()));
         }
     };
@@ -543,7 +628,6 @@ async fn post_register(
     if exists.is_some() {
         if let Err(e) = session.insert("notice", "アカウント名がすでに使われています")
         {
-            log::error!("{:?}", &e);
             return Ok(HttpResponse::InternalServerError().body(e.to_string()));
         } else {
             return Ok(HttpResponse::Found()
@@ -555,7 +639,6 @@ async fn post_register(
     let pass_hash = match calculate_passhash(&params.account_name, &params.password) {
         Ok(p) => p,
         Err(e) => {
-            log::error!("{:?}", &e);
             return Ok(HttpResponse::InternalServerError().body(e.to_string()));
         }
     };
@@ -569,18 +652,14 @@ async fn post_register(
     {
         Ok(r) => r.last_insert_id(),
         Err(e) => {
-            log::error!("{:?}", &e);
             return Ok(HttpResponse::Ok().body(e.to_string()));
         }
     };
-    log::debug!("last insert id {}", &uid);
 
     if let Err(e) = session.insert("user_id", uid) {
-        log::error!("{:?}", &e);
         return Ok(HttpResponse::Ok().body(e.to_string()));
     }
     if let Err(e) = session.insert("csrf_token", secure_random_str(32)) {
-        log::error!("{:?}", &e);
         return Ok(HttpResponse::Ok().body(e.to_string()));
     }
 
@@ -607,16 +686,14 @@ async fn get_index(
     let me = match get_session_user(&session, pool.as_ref()).await {
         Ok(user) => user.unwrap_or_default(),
         Err(e) => {
-            log::error!("{:?}", &e);
             return Ok(HttpResponse::InternalServerError().body(e.to_string()));
         }
     };
 
-    let results = match sqlx::query_as!(Post,"SELECT `id`, `user_id`, `body`, `mime`, `created_at`, b'0' AS imgdata FROM `posts` ORDER BY `created_at` DESC").fetch_all(pool.as_ref()).await {
+    let results = match sqlx::query_as!(Post, "SELECT `id`, `user_id`, `body`, `mime`, `created_at`, b'0' AS imgdata FROM `posts` ORDER BY `created_at` DESC").fetch_all(pool.as_ref()).await {
         Ok(results) => results,
         Err(e) => {
-            log::error!("{:?}",&e);
-            return Ok(HttpResponse::Ok().body(e.to_string()));
+            return Ok(HttpResponse::InternalServerError().body(e.to_string()));
         }
     };
 
@@ -625,8 +702,7 @@ async fn get_index(
     let posts = match make_post(results, csrf_token, false, pool.as_ref()).await {
         Ok(posts) => posts,
         Err(e) => {
-            log::error!("{:?}", &e);
-            return Ok(HttpResponse::Ok().body(e.to_string()));
+            return Ok(HttpResponse::InternalServerError().body(e.to_string()));
         }
     };
 
@@ -671,7 +747,6 @@ async fn get_account_name(
         Ok(Some(user)) => user,
         Ok(None) => return Ok(HttpResponse::NotFound().finish()),
         Err(e) => {
-            log::error!("{:?}", &e);
             return Ok(HttpResponse::Ok().body(e.to_string()));
         }
     };
@@ -679,7 +754,6 @@ async fn get_account_name(
     let results = match sqlx::query_as!(Post,"SELECT `id`, `user_id`, `body`, `mime`, `created_at`, b'0' AS imgdata FROM `posts` WHERE `user_id` = ? ORDER BY `created_at` DESC",user.id).fetch_all(pool.as_ref()).await{
         Ok(r) => r,
         Err(e)=>{
-               log::error!("{:?}", &e);
             return Ok(HttpResponse::Ok().body(e.to_string()));
         }
     };
@@ -694,7 +768,6 @@ async fn get_account_name(
     {
         Ok(p) => p,
         Err(e) => {
-            log::error!("{:?}", &e);
             return Ok(HttpResponse::Ok().body(e.to_string()));
         }
     };
@@ -708,7 +781,6 @@ async fn get_account_name(
     {
         Ok(r) => r.count,
         Err(e) => {
-            log::error!("{:?}", &e);
             return Ok(HttpResponse::Ok().body(e.to_string()));
         }
     };
@@ -719,7 +791,6 @@ async fn get_account_name(
     {
         Ok(records) => records.iter().map(|r| r.id).collect::<Vec<i32>>(),
         Err(e) => {
-            log::error!("{:?}", &e);
             return Ok(HttpResponse::Ok().body(e.to_string()));
         }
     };
@@ -750,7 +821,6 @@ async fn get_account_name(
         let commented_count = match query.fetch_one(pool.as_ref()).await {
             Ok(c) => c,
             Err(e) => {
-                log::error!("{:?}", &e);
                 return Ok(HttpResponse::Ok().body(e.to_string()));
             }
         };
@@ -763,7 +833,6 @@ async fn get_account_name(
     let me = match get_session_user(&session, pool.as_ref()).await {
         Ok(me) => me.unwrap_or_default(),
         Err(e) => {
-            log::error!("{:?}", &e);
             return Ok(HttpResponse::InternalServerError().body(e.to_string()));
         }
     };
@@ -805,7 +874,6 @@ async fn get_posts(
     let t = match DateTime::parse_from_rfc3339(&max_create_at) {
         Ok(t) => t,
         Err(e) => {
-            log::error!("{:?}", &e);
             return Ok(HttpResponse::Ok().body(e.to_string()));
         }
     };
@@ -813,7 +881,6 @@ async fn get_posts(
     let results = match sqlx::query_as!(Post,"SELECT `id`, `user_id`, `body`, `mime`, `created_at`, b'0' AS imgdata FROM `posts` WHERE `created_at` <= ? ORDER BY `created_at` DESC",&t.to_rfc3339()).fetch_all(pool.as_ref()).await{
         Ok(r)=> r,
         Err(e)=> {
-            log::error!("{:?}", &e);
             return Ok(HttpResponse::Ok().body(e.to_string()));
         }
     };
@@ -828,7 +895,6 @@ async fn get_posts(
     {
         Ok(p) => p,
         Err(e) => {
-            log::error!("{:?}", &e);
             return Ok(HttpResponse::Ok().body(e.to_string()));
         }
     };
@@ -836,8 +902,6 @@ async fn get_posts(
     if posts.is_empty() {
         return Ok(HttpResponse::NotFound().finish());
     }
-
-    log::debug!("posts len {}", posts.len());
 
     let body = {
         let mut map = Map::new();
@@ -864,7 +928,6 @@ async fn get_posts_id(
     {
         Ok(r) => r,
         Err(e) => {
-            log::error!("{:?}", &e);
             return Ok(HttpResponse::Ok().body(e.to_string()));
         }
     };
@@ -879,7 +942,6 @@ async fn get_posts_id(
     {
         Ok(p) => p,
         Err(e) => {
-            log::error!("{:?}", &e);
             return Ok(HttpResponse::Ok().body(e.to_string()));
         }
     };
@@ -893,7 +955,6 @@ async fn get_posts_id(
     let me = match get_session_user(&session, pool.as_ref()).await {
         Ok(u) => u.unwrap_or_default(),
         Err(e) => {
-            log::error!("{:?}", &e);
             return Ok(HttpResponse::InternalServerError().body(e.to_string()));
         }
     };
@@ -929,7 +990,6 @@ async fn post_index(
             me.unwrap_or_default()
         }
         Err(e) => {
-            log::error!("{:?}", &e);
             return Ok(HttpResponse::InternalServerError().body(e.to_string()));
         }
     };
@@ -940,21 +1000,15 @@ async fn post_index(
     let mut csrf_token = String::new();
 
     while let Some(mut field) = payload.try_next().await? {
-        log::debug!("{}", field.name());
-        log::debug!("{:#?}", field.content_type());
-        log::debug!("{:#?}", field.content_disposition());
-        log::debug!("{:#?}", field.headers());
         match field.name() {
             "file" => {
                 let content_type = field.content_type();
-                log::debug!("content_type {:?}", &content_type);
                 match content_type {
                     Some(mime)
                         if mime == &mime::IMAGE_JPEG
                             || mime == &mime::IMAGE_PNG
                             || mime == &mime::IMAGE_GIF =>
                     {
-                        log::debug!("This is image");
                         mime_ = mime.to_string();
                         file = field_to_vec(&mut field).await.unwrap_or_default();
                     }
@@ -965,10 +1019,7 @@ async fn post_index(
                             Ok(_) => Ok(HttpResponse::Found()
                                 .insert_header((header::LOCATION, "/"))
                                 .finish()),
-                            Err(e) => {
-                                log::error!("{:?}", &e);
-                                Ok(HttpResponse::InternalServerError().body(e.to_string()))
-                            }
+                            Err(e) => Ok(HttpResponse::InternalServerError().body(e.to_string())),
                         }
                     }
                     _ => {
@@ -976,10 +1027,7 @@ async fn post_index(
                             Ok(_) => Ok(HttpResponse::Found()
                                 .insert_header((header::LOCATION, "/"))
                                 .finish()),
-                            Err(e) => {
-                                log::error!("{:?}", &e);
-                                Ok(HttpResponse::InternalServerError().body(e.to_string()))
-                            }
+                            Err(e) => Ok(HttpResponse::InternalServerError().body(e.to_string())),
                         }
                     }
                 }
@@ -994,7 +1042,7 @@ async fn post_index(
                 let bytes = field_to_vec(&mut field).await.unwrap_or_default();
                 csrf_token = String::from_utf8(bytes).unwrap_or_default();
             }
-            _ => log::debug!("other"),
+            _ => (),
         }
     }
 
@@ -1003,14 +1051,12 @@ async fn post_index(
     }
 
     if file.len() > UPLOAD_LIMIT {
-        if let Err(e) = session.insert("notice", "ファイルサイズが大きすぎます") {
-            log::error!("{:?}", &e);
-            return Ok(HttpResponse::InternalServerError().body(e.to_string()));
-        } else {
-            return Ok(HttpResponse::Found()
+        return match session.insert("notice", "ファイルサイズが大きすぎます") {
+            Ok(_) => Ok(HttpResponse::Found()
                 .insert_header((header::LOCATION, "/"))
-                .finish());
-        }
+                .finish()),
+            Err(e) => Ok(HttpResponse::InternalServerError().body(e.to_string())),
+        };
     }
 
     let pid = match sqlx::query!(
@@ -1025,7 +1071,6 @@ async fn post_index(
     {
         Ok(result) => result.last_insert_id(),
         Err(e) => {
-            log::error!("{:?}", &e);
             return Ok(HttpResponse::Ok().body(e.to_string()));
         }
     };
@@ -1048,7 +1093,6 @@ async fn get_image(
     {
         Ok(Some(post)) => post,
         Err(e) => {
-            log::warn!("{:?}", &e);
             return Ok(HttpResponse::Ok().body(e.to_string()));
         }
         _ => {
@@ -1082,13 +1126,18 @@ async fn post_comment(
             me.unwrap_or_default()
         }
         Err(e) => {
-            log::warn!("{:?}", &e);
             return Ok(HttpResponse::InternalServerError().body(e.to_string()));
         }
     };
 
-    if params.csrf_token != get_csrf_token(&session).unwrap_or_default() {
-        return Ok(HttpResponse::UnprocessableEntity().finish());
+    let csrf_token = get_csrf_token(&session);
+
+    match csrf_token {
+        Some(csrf_token) if csrf_token != params.csrf_token => {
+            return Ok(HttpResponse::UnprocessableEntity().finish());
+        }
+        None => return Ok(HttpResponse::UnprocessableEntity().finish()),
+        _ => (),
     }
 
     if let Err(e) = sqlx::query!(
@@ -1100,7 +1149,6 @@ async fn post_comment(
     .execute(pool.as_ref())
     .await
     {
-        log::warn!("{:?}", &e);
         return Ok(HttpResponse::Ok().body(e.to_string()));
     }
 
@@ -1125,7 +1173,6 @@ async fn get_admin_banned(
             me.unwrap_or_default()
         }
         Err(e) => {
-            log::warn!("{:?}", &e);
             return Ok(HttpResponse::InternalServerError().body(e.to_string()));
         }
     };
@@ -1143,7 +1190,6 @@ async fn get_admin_banned(
     {
         Ok(users) => users,
         Err(e) => {
-            log::warn!("{:?}", &e);
             return Ok(HttpResponse::Ok().body(e.to_string()));
         }
     };
@@ -1182,7 +1228,6 @@ async fn post_admin_banned(
             me.unwrap_or_default()
         }
         Err(e) => {
-            log::warn!("{:?}", &e);
             return Ok(HttpResponse::InternalServerError().body(e.to_string()));
         }
     };
@@ -1201,11 +1246,9 @@ async fn post_admin_banned(
         match serde_qs::from_str::<BannedParams>(&body.replace("%5B", "[").replace("%5D", "]")) {
             Ok(q) => q,
             Err(e) => {
-                log::error!("{:#?}", &e);
                 return Ok(HttpResponse::Ok().body(e.to_string()));
             }
         };
-    log::debug!("admin banned {:?}", query);
 
     if query.csrf_token != get_csrf_token(&session).unwrap_or_default() {
         return Ok(HttpResponse::UnprocessableEntity().finish());
@@ -1216,7 +1259,6 @@ async fn post_admin_banned(
             .execute(pool.as_ref())
             .await
         {
-            log::warn!("{:?}", &e);
             return Ok(HttpResponse::InternalServerError().body(e.to_string()));
         }
     }
@@ -1226,48 +1268,8 @@ async fn post_admin_banned(
         .finish())
 }
 
-fn init_logger<P: AsRef<Path>>(log_dir: Option<P>) {
-    const JST_UTCOFFSET_SECS: i32 = 9 * 3600;
-
-    let jst_now = {
-        let jst = Utc::now();
-        jst.with_timezone(&FixedOffset::east(JST_UTCOFFSET_SECS))
-    };
-
-    let offset = UtcOffset::from_whole_seconds(JST_UTCOFFSET_SECS).unwrap();
-
-    let mut config = ConfigBuilder::new();
-    config.set_time_offset(offset);
-
-    let mut logger: Vec<Box<dyn SharedLogger>> = vec![
-        #[cfg(not(feature = "termcolor"))]
-        TermLogger::new(
-            if cfg!(debug_assertions) {
-                LevelFilter::Debug
-            } else {
-                LevelFilter::Warn
-            },
-            config.build(),
-            TerminalMode::Mixed,
-            ColorChoice::Always,
-        ),
-    ];
-    if let Some(log_path) = log_dir {
-        let log_path = log_path.as_ref();
-        std::fs::create_dir_all(&log_path).unwrap();
-        logger.push(WriteLogger::new(
-            LevelFilter::Warn,
-            config.build(),
-            std::fs::File::create(log_path.join(format!("{}.log", jst_now))).unwrap(),
-        ));
-    }
-    CombinedLogger::init(logger).unwrap()
-}
-
 #[actix_web::main]
 async fn main() -> io::Result<()> {
-    init_logger::<&str>(None);
-
     let host = env::var("ISUCONP_DB_HOST").unwrap_or_else(|_| "localhost".to_string());
     let port: u32 = env::var("ISUCONP_DB_PORT")
         .unwrap_or_else(|_| "3306".to_string())
@@ -1291,11 +1293,6 @@ async fn main() -> io::Result<()> {
         )
     };
 
-    let memcached_address =
-        env::var("ISUCONP_MEMCACHED_ADDRESS").unwrap_or_else(|_| "localhost:11211".to_string());
-
-    let num_cpus = num_cpus::get();
-
     let db = sqlx::mysql::MySqlPoolOptions::new()
         .max_connections(24)
         .acquire_timeout(Duration::from_secs(30))
@@ -1306,6 +1303,11 @@ async fn main() -> io::Result<()> {
     let private_key = actix_web::cookie::Key::generate();
 
     HttpServer::new(move || {
+        let memcached_address = format!(
+            "memcache://{}",
+            env::var("ISUCONP_MEMCACHED_ADDRESS").unwrap_or_else(|_| "localhost:11211".to_string())
+        );
+
         let mut handlebars = Handlebars::new();
         handlebars.register_helper("image_url_helper", Box::new(image_url));
         handlebars.register_helper("date_time_format", Box::new(date_time_format));
@@ -1326,11 +1328,20 @@ async fn main() -> io::Result<()> {
                     .supports_credentials()
                     .allowed_origin("http://localhost")
             })
-            // TODO: memcachedに対応する
-            .wrap(SessionMiddleware::new(
-                CookieSessionStore::default(),
-                private_key.clone(),
-            ))
+            .wrap(
+                SessionMiddleware::builder(
+                    MemcachedSessionStore::new(memcached_address).unwrap(),
+                    private_key.clone(),
+                )
+                // NOTE: http://host.docker.internalで接続できる必要があるのでfalse
+                .cookie_secure(false)
+                .session_lifecycle(
+                    PersistentSession::default()
+                        .session_ttl(actix_web::cookie::time::Duration::seconds(SESSION_TTL)),
+                )
+                    .cookie_name("isuconp-rust.session".to_string())
+                .build(),
+            )
             .app_data(Data::new(db.clone()))
             .app_data(Data::new(handlebars))
             .service(get_initialize)
