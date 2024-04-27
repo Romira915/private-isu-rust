@@ -1,0 +1,69 @@
+{
+  "db_name": "MySQL",
+  "query": "SELECT * FROM `comments` WHERE `post_id` = ? ORDER BY `created_at` DESC",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": {
+          "type": "Long",
+          "flags": "NOT_NULL | PRIMARY_KEY | AUTO_INCREMENT",
+          "char_set": 63,
+          "max_size": 11
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "post_id",
+        "type_info": {
+          "type": "Long",
+          "flags": "NOT_NULL | NO_DEFAULT_VALUE",
+          "char_set": 63,
+          "max_size": 11
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "user_id",
+        "type_info": {
+          "type": "Long",
+          "flags": "NOT_NULL | NO_DEFAULT_VALUE",
+          "char_set": 63,
+          "max_size": 11
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "comment",
+        "type_info": {
+          "type": "Blob",
+          "flags": "NOT_NULL | BLOB | NO_DEFAULT_VALUE",
+          "char_set": 224,
+          "max_size": 262140
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "created_at",
+        "type_info": {
+          "type": "Timestamp",
+          "flags": "NOT_NULL | BINARY | TIMESTAMP",
+          "char_set": 63,
+          "max_size": 19
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "2464a01edff564812d0faec414045f95d6f2ff873549fdad3e60e355de1bc387"
+}

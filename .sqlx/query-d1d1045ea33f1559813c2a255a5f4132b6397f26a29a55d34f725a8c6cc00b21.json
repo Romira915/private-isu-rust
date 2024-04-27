@@ -1,0 +1,12 @@
+{
+  "db_name": "MySQL",
+  "query": "DELETE FROM posts WHERE id > 10000",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": []
+  },
+  "hash": "d1d1045ea33f1559813c2a255a5f4132b6397f26a29a55d34f725a8c6cc00b21"
+}

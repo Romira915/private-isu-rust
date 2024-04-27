@@ -1,0 +1,25 @@
+{
+  "db_name": "MySQL",
+  "query": "SELECT COUNT(*) AS count FROM `comments` WHERE `user_id` = ?",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count",
+        "type_info": {
+          "type": "LongLong",
+          "flags": "NOT_NULL | BINARY",
+          "char_set": 63,
+          "max_size": 21
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "426a109ca786904d721de7262a981dde79b51d836cf0a1cbc712d4f57f93a061"
+}

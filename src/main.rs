@@ -8,7 +8,6 @@ use actix_multipart::{Field, Multipart};
 use actix_session::config::PersistentSession;
 use actix_session::storage::{LoadError, SaveError, SessionKey, SessionStore, UpdateError};
 use actix_session::{Session, SessionMiddleware};
-use actix_web::cookie::SameSite;
 use actix_web::{
     get,
     http::header,

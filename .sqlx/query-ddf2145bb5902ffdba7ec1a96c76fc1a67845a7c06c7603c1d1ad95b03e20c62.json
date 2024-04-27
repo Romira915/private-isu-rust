@@ -1,0 +1,25 @@
+{
+  "db_name": "MySQL",
+  "query": "SELECT `id` FROM `posts` WHERE `user_id` = ?",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": {
+          "type": "Long",
+          "flags": "NOT_NULL | PRIMARY_KEY | AUTO_INCREMENT",
+          "char_set": 63,
+          "max_size": 11
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "ddf2145bb5902ffdba7ec1a96c76fc1a67845a7c06c7603c1d1ad95b03e20c62"
+}
