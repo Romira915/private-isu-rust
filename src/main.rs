@@ -1090,7 +1090,7 @@ async fn get_image(
 ) -> Result<HttpResponse> {
     let (pid, ext) = path.into_inner();
 
-    let post = match sqlx::query_as!(Post, "SELECT * FROM `posts` WHERE `id` = ?", pid)
+    let post = match sqlx::query!("SELECT mime, imgdata FROM `posts` WHERE `id` = ?", pid)
         .fetch_optional(pool.as_ref())
         .await
     {
