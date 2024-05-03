@@ -76,7 +76,6 @@ impl Default for User {
 struct Post {
     id: i32,
     user_id: i32,
-    imgdata: Vec<u8>,
     body: String,
     mime: String,
     created_at: chrono::DateTime<Utc>,
@@ -438,6 +437,15 @@ async fn make_post(
     Ok(granted_info_posts)
 }
 
+async fn make_post2(
+    results: Vec<Post>,
+    csrf_token: String,
+    all_comments: bool,
+    pool: &Pool<MySql>,
+) -> anyhow::Result<Vec<GrantedInfoPost>> {
+    todo!("make_post2")
+}
+
 handlebars_helper!(image_url: |p: GrantedInfoPost| {
     let ext = match p.post.mime.as_str() {
             "image/jpeg" => ".jpg",
@@ -690,7 +698,7 @@ async fn get_index(
         }
     };
 
-    let results = match sqlx::query_as!(Post, "SELECT `id`, `user_id`, `body`, `mime`, `created_at`, b'0' AS imgdata FROM `posts` ORDER BY `created_at` DESC").fetch_all(pool.as_ref()).await {
+    let results = match sqlx::query_as!(Post, "SELECT `id`, `user_id`, `body`, `mime`, `created_at` FROM `posts` ORDER BY `created_at` DESC LIMIT ?", POSTS_PER_PAGE as u32).fetch_all(pool.as_ref()).await {
         Ok(results) => results,
         Err(e) => {
             return Ok(HttpResponse::InternalServerError().body(e.to_string()));
@@ -751,9 +759,9 @@ async fn get_account_name(
         }
     };
 
-    let results = match sqlx::query_as!(Post,"SELECT `id`, `user_id`, `body`, `mime`, `created_at`, b'0' AS imgdata FROM `posts` WHERE `user_id` = ? ORDER BY `created_at` DESC",user.id).fetch_all(pool.as_ref()).await{
+    let results = match sqlx::query_as!(Post,"SELECT `id`, `user_id`, `body`, `mime`, `created_at` FROM `posts` WHERE `user_id` = ? ORDER BY `created_at` DESC",user.id).fetch_all(pool.as_ref()).await {
         Ok(r) => r,
-        Err(e)=>{
+        Err(e) => {
             return Ok(HttpResponse::Ok().body(e.to_string()));
         }
     };
@@ -878,9 +886,9 @@ async fn get_posts(
         }
     };
 
-    let results = match sqlx::query_as!(Post,"SELECT `id`, `user_id`, `body`, `mime`, `created_at`, b'0' AS imgdata FROM `posts` WHERE `created_at` <= ? ORDER BY `created_at` DESC",&t.to_rfc3339()).fetch_all(pool.as_ref()).await{
-        Ok(r)=> r,
-        Err(e)=> {
+    let results = match sqlx::query_as!(Post,"SELECT `id`, `user_id`, `body`, `mime`, `created_at` FROM `posts` WHERE `created_at` <= ? ORDER BY `created_at` DESC",&t.to_rfc3339()).fetch_all(pool.as_ref()).await {
+        Ok(r) => r,
+        Err(e) => {
             return Ok(HttpResponse::Ok().body(e.to_string()));
         }
     };
@@ -925,9 +933,13 @@ async fn get_posts_id(
     pool: Data<Pool<MySql>>,
     handlebars: Data<Handlebars<'_>>,
 ) -> Result<HttpResponse> {
-    let results = match sqlx::query_as!(Post, "SELECT * FROM `posts` WHERE `id` = ?", pid.0)
-        .fetch_all(pool.as_ref())
-        .await
+    let results = match sqlx::query_as!(
+        Post,
+        "SELECT `id`, `user_id`, `body`, `mime`, `created_at` FROM `posts` WHERE `id` = ?",
+        pid.0
+    )
+    .fetch_all(pool.as_ref())
+    .await
     {
         Ok(r) => r,
         Err(e) => {
@@ -1023,7 +1035,7 @@ async fn post_index(
                                 .insert_header((header::LOCATION, "/"))
                                 .finish()),
                             Err(e) => Ok(HttpResponse::InternalServerError().body(e.to_string())),
-                        }
+                        };
                     }
                     _ => {
                         return match session.insert("notice", "画像が必須です") {
@@ -1031,7 +1043,7 @@ async fn post_index(
                                 .insert_header((header::LOCATION, "/"))
                                 .finish()),
                             Err(e) => Ok(HttpResponse::InternalServerError().body(e.to_string())),
-                        }
+                        };
                     }
                 }
             }
@@ -1364,7 +1376,8 @@ async fn main() -> io::Result<()> {
             .service(post_admin_banned)
             .service(get_account_name)
             .service(Files::new("/", "../public"))
-    }).workers(4)
+    })
+    .workers(4)
     .bind(("0.0.0.0", 8080))?
     .run()
     .await

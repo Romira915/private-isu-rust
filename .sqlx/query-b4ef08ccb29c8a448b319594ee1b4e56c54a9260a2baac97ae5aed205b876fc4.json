@@ -1,6 +1,6 @@
 {
   "db_name": "MySQL",
-  "query": "SELECT `id`, `user_id`, `body`, `mime`, `created_at`, b'0' AS imgdata FROM `posts` WHERE `user_id` = ? ORDER BY `created_at` DESC",
+  "query": "SELECT `id`, `user_id`, `body`, `mime`, `created_at` FROM `posts` WHERE `id` = ?",
   "describe": {
     "columns": [
       {
@@ -52,16 +52,6 @@
           "char_set": 63,
           "max_size": 19
         }
-      },
-      {
-        "ordinal": 5,
-        "name": "imgdata",
-        "type_info": {
-          "type": "VarString",
-          "flags": "NOT_NULL | BINARY",
-          "char_set": 63,
-          "max_size": 1
-        }
       }
     ],
     "parameters": {
@@ -72,9 +62,8 @@
       false,
       false,
       false,
-      false,
       false
     ]
   },
-  "hash": "ecd6527d97788b5d657febe6dd853ece5d0d1f13e57387309dcfdda9eb777c14"
+  "hash": "b4ef08ccb29c8a448b319594ee1b4e56c54a9260a2baac97ae5aed205b876fc4"
 }
