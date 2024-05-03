@@ -698,7 +698,7 @@ async fn get_index(
         }
     };
 
-    let results = match sqlx::query_as!(Post, "SELECT `id`, `user_id`, `body`, `mime`, `created_at` FROM `posts` ORDER BY `created_at` DESC LIMIT ?", POSTS_PER_PAGE as u32).fetch_all(pool.as_ref()).await {
+    let results = match sqlx::query_as!(Post, "SELECT `id`, `user_id`, `body`, `mime`, `created_at` FROM `posts` ORDER BY `created_at` DESC LIMIT ?", POSTS_PER_PAGE as u32 + 5).fetch_all(pool.as_ref()).await {
         Ok(results) => results,
         Err(e) => {
             return Ok(HttpResponse::InternalServerError().body(e.to_string()));
