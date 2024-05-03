@@ -1110,6 +1110,7 @@ async fn get_image(
 
     Ok(HttpResponse::Ok()
         .content_type(content_type)
+        .insert_header((header::CACHE_CONTROL, "public, max-age=31536000"))
         .body(post.imgdata))
 }
 
