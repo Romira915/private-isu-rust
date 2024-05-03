@@ -1,6 +1,6 @@
 {
   "db_name": "MySQL",
-  "query": "SELECT * FROM `posts` WHERE `id` = ?",
+  "query": "SELECT `id`, `user_id`, `body`, `mime`, `created_at` FROM `posts` ORDER BY `created_at` DESC LIMIT ?",
   "describe": {
     "columns": [
       {
@@ -25,26 +25,6 @@
       },
       {
         "ordinal": 2,
-        "name": "mime",
-        "type_info": {
-          "type": "VarString",
-          "flags": "NOT_NULL | NO_DEFAULT_VALUE",
-          "char_set": 224,
-          "max_size": 256
-        }
-      },
-      {
-        "ordinal": 3,
-        "name": "imgdata",
-        "type_info": {
-          "type": "Blob",
-          "flags": "NOT_NULL | BLOB | BINARY | NO_DEFAULT_VALUE",
-          "char_set": 63,
-          "max_size": 16777215
-        }
-      },
-      {
-        "ordinal": 4,
         "name": "body",
         "type_info": {
           "type": "Blob",
@@ -54,7 +34,17 @@
         }
       },
       {
-        "ordinal": 5,
+        "ordinal": 3,
+        "name": "mime",
+        "type_info": {
+          "type": "VarString",
+          "flags": "NOT_NULL | NO_DEFAULT_VALUE",
+          "char_set": 224,
+          "max_size": 256
+        }
+      },
+      {
+        "ordinal": 4,
         "name": "created_at",
         "type_info": {
           "type": "Timestamp",
@@ -72,9 +62,8 @@
       false,
       false,
       false,
-      false,
       false
     ]
   },
-  "hash": "27968c29f9d77ab1d973f4fb966b8a0101329cd55315f9f60e780b6f5bc79d8c"
+  "hash": "0b95ece731a0bfb2c664228eb4b3f0d00725a066aaf5a2606728855666c9ecbd"
 }
