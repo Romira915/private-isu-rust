@@ -2,6 +2,9 @@ FROM rust:1.77.2
 
 WORKDIR /home/webapp
 
+RUN apt-get update && apt-get install -y \
+    htop
+
 COPY Cargo.toml Cargo.toml
 RUN mkdir src \
     && echo "fn main(){}" > src/main.rs \
