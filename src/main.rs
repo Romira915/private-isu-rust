@@ -1364,7 +1364,7 @@ async fn main() -> io::Result<()> {
             .service(post_admin_banned)
             .service(get_account_name)
             .service(Files::new("/", "../public"))
-    })
+    }).workers(4)
     .bind(("0.0.0.0", 8080))?
     .run()
     .await
