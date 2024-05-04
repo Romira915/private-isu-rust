@@ -1,6 +1,6 @@
 {
   "db_name": "MySQL",
-  "query": "SELECT p.id         AS post_id,\n                   p.user_id    AS user_id,\n                   p.mime,\n                   p.body,\n                   p.created_at AS post_created_at,\n                   u.account_name,\n                   u.created_at AS user_created_at\n            FROM posts as p\n                     JOIN users as u ON p.user_id = u.id\n            WHERE p.created_at <= ?\n              AND u.del_flg = 0\n            ORDER BY p.created_at DESC\n            LIMIT 20",
+  "query": "SELECT p.id         AS post_id,\n                   p.user_id    AS user_id,\n                   p.mime,\n                   p.body,\n                   p.created_at AS post_created_at,\n                   u.account_name,\n                   u.created_at AS user_created_at\n            FROM posts as p FORCE INDEX (posts_created_at_idx)\n                     JOIN users as u ON p.user_id = u.id\n            WHERE p.created_at <= ?\n              AND u.del_flg = 0\n            ORDER BY p.created_at DESC\n            LIMIT 20",
   "describe": {
     "columns": [
       {
@@ -87,5 +87,5 @@
       false
     ]
   },
-  "hash": "b5b15184e0c1cbf03b56fe5a35003652f72f84ac503c5fd3baac115f9e8a8ae6"
+  "hash": "59dfd89208aebfb861b84a86960394fa86a4cfbcc037efedcc21a9bdfaa2e139"
 }
