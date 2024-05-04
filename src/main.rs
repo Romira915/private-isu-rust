@@ -854,7 +854,7 @@ async fn get_index(
     let post_raws = match sqlx::query_as!(
             PostRaw,
             r#"SELECT p.id AS post_id, p.user_id AS user_id, p.mime, p.body, p.created_at AS post_created_at, u.account_name, u.created_at AS user_created_at
-                FROM posts as p
+                FROM posts as p FORCE INDEX (posts_created_at_idx)
                     JOIN users as u ON p.user_id = u.id
                 WHERE u.del_flg = 0
                 ORDER BY p.created_at DESC
@@ -1068,7 +1068,7 @@ async fn get_posts(
                    p.created_at AS post_created_at,
                    u.account_name,
                    u.created_at AS user_created_at
-            FROM posts as p
+            FROM posts as p FORCE INDEX (posts_created_at_idx)
                      JOIN users as u ON p.user_id = u.id
             WHERE p.created_at <= ?
               AND u.del_flg = 0
@@ -1134,7 +1134,7 @@ async fn get_posts_id(
                    p.created_at AS post_created_at,
                    u.account_name,
                    u.created_at AS user_created_at
-            FROM posts as p
+            FROM posts as p FORCE INDEX (PRIMARY)
                      JOIN users as u ON p.user_id = u.id
             WHERE p.id = ?
               AND u.del_flg = 0
