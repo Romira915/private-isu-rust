@@ -1,0 +1,91 @@
+{
+  "db_name": "MySQL",
+  "query": "SELECT p.id         AS post_id,\n                   p.user_id    AS user_id,\n                   p.mime,\n                   p.body,\n                   p.created_at AS post_created_at,\n                   u.account_name,\n                   u.created_at AS user_created_at\n            FROM posts as p\n                     JOIN users as u ON p.user_id = u.id\n            WHERE p.id = ?\n              AND u.del_flg = 0\n            ORDER BY p.created_at DESC\n            LIMIT 20",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "post_id",
+        "type_info": {
+          "type": "Long",
+          "flags": "NOT_NULL | PRIMARY_KEY | AUTO_INCREMENT",
+          "char_set": 63,
+          "max_size": 11
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "user_id",
+        "type_info": {
+          "type": "Long",
+          "flags": "NOT_NULL | NO_DEFAULT_VALUE",
+          "char_set": 63,
+          "max_size": 11
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "mime",
+        "type_info": {
+          "type": "VarString",
+          "flags": "NOT_NULL | NO_DEFAULT_VALUE",
+          "char_set": 224,
+          "max_size": 256
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "body",
+        "type_info": {
+          "type": "Blob",
+          "flags": "NOT_NULL | BLOB | NO_DEFAULT_VALUE",
+          "char_set": 224,
+          "max_size": 262140
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "post_created_at",
+        "type_info": {
+          "type": "Timestamp",
+          "flags": "NOT_NULL | MULTIPLE_KEY | BINARY | TIMESTAMP",
+          "char_set": 63,
+          "max_size": 19
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "account_name",
+        "type_info": {
+          "type": "VarString",
+          "flags": "NOT_NULL | UNIQUE_KEY | NO_DEFAULT_VALUE",
+          "char_set": 224,
+          "max_size": 256
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "user_created_at",
+        "type_info": {
+          "type": "Timestamp",
+          "flags": "NOT_NULL | BINARY | TIMESTAMP",
+          "char_set": 63,
+          "max_size": 19
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "950678b3a686d25078410271dfc86d7ed4f01e7b5e8ede01e55b72a2b3bce405"
+}

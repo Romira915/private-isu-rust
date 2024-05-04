@@ -1,0 +1,91 @@
+{
+  "db_name": "MySQL",
+  "query": "SELECT ranked_comments.id,\n                           ranked_comments.post_id,\n                           ranked_comments.user_id,\n                           ranked_comments.comment,\n                           ranked_comments.created_at AS comment_created_at,\n                           u.account_name,\n                           u.created_at AS user_created_at\n                    FROM (SELECT *,\n                                 ROW_NUMBER() OVER (PARTITION BY post_id ORDER BY created_at DESC) AS row_num\n                          FROM comments\n                          WHERE post_id IN (?)) AS ranked_comments\n                             JOIN users AS u ON ranked_comments.user_id = u.id\n                    WHERE u.del_flg = 0\n                    ORDER BY post_id, comment_created_at DESC",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": {
+          "type": "Long",
+          "flags": "NOT_NULL",
+          "char_set": 63,
+          "max_size": 11
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "post_id",
+        "type_info": {
+          "type": "Long",
+          "flags": "NOT_NULL | NO_DEFAULT_VALUE",
+          "char_set": 63,
+          "max_size": 11
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "user_id",
+        "type_info": {
+          "type": "Long",
+          "flags": "NOT_NULL | NO_DEFAULT_VALUE",
+          "char_set": 63,
+          "max_size": 11
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "comment",
+        "type_info": {
+          "type": "Blob",
+          "flags": "NOT_NULL | BLOB | NO_DEFAULT_VALUE",
+          "char_set": 224,
+          "max_size": 262140
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "comment_created_at",
+        "type_info": {
+          "type": "Timestamp",
+          "flags": "NOT_NULL | BINARY",
+          "char_set": 63,
+          "max_size": 19
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "account_name",
+        "type_info": {
+          "type": "VarString",
+          "flags": "NOT_NULL | UNIQUE_KEY | NO_DEFAULT_VALUE",
+          "char_set": 224,
+          "max_size": 256
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "user_created_at",
+        "type_info": {
+          "type": "Timestamp",
+          "flags": "NOT_NULL | BINARY | TIMESTAMP",
+          "char_set": 63,
+          "max_size": 19
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "1fd8cca9f1e5f64a56d271fa03334811a4f060cc9b60484b6dd8d03eb011b09a"
+}
