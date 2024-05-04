@@ -1,0 +1,12 @@
+{
+  "db_name": "MySQL",
+  "query": "INSERT INTO `posts` (`user_id`, `mime`, `imgdata`, `body`) VALUES (?, ?, b'0', ?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "109c8423fbac51823fbd2f1b2a152a7e6f81b1d24214eb880a62d42866e068d1"
+}

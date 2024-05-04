@@ -1,0 +1,25 @@
+{
+  "db_name": "MySQL",
+  "query": "SELECT imgdata FROM `posts` WHERE `id` = ?",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "imgdata",
+        "type_info": {
+          "type": "Blob",
+          "flags": "NOT_NULL | BLOB | BINARY | NO_DEFAULT_VALUE",
+          "char_set": 63,
+          "max_size": 16777215
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "4d1c35a2d5cc63446c8f6710ea9b378f4da9c57fe478805438b6ce7bc3204aec"
+}
