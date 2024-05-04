@@ -442,12 +442,10 @@ async fn make_post_for_index(
     pool: &Pool<MySql>,
 ) -> anyhow::Result<Vec<GrantedInfoPost>> {
     let posts_raw = sqlx::query!(
-        r#"SELECT p.id AS post_id, p.user_id AS user_id, p.mime, p.body, p.created_at AS post_created_at, u.account_name, u.created_at AS user_created_at, COUNT(c.comment) AS comment_count
+        r#"SELECT p.id AS post_id, p.user_id AS user_id, p.mime, p.body, p.created_at AS post_created_at, u.account_name, u.created_at AS user_created_at
             FROM posts as p
                 JOIN users as u ON p.user_id = u.id
-                JOIN comments as c ON p.id = c.post_id
             WHERE u.del_flg = 0
-            GROUP BY p.id, p.user_id, p.mime, p.body, p.created_at, u.account_name
             ORDER BY p.created_at DESC
             LIMIT ?"#,
         POSTS_PER_PAGE as u32 + 5
@@ -474,6 +472,24 @@ async fn make_post_for_index(
             ORDER BY post_id, comment_created_at DESC"#,
         post_ids.iter().map(|i| i.to_string()).collect::<Vec<String>>().join(", ")
         ).fetch_all(pool).await?
+    };
+
+    let comment_count_raw = {
+        let post_ids = posts_raw.iter().map(|p| p.post_id).collect::<Vec<i32>>();
+
+        sqlx::query!(
+            r#"SELECT post_id, COUNT(*) AS comment_count
+            FROM comments
+            WHERE post_id IN (?)
+            GROUP BY post_id"#,
+            post_ids
+                .iter()
+                .map(|i| i.to_string())
+                .collect::<Vec<String>>()
+                .join(", ")
+        )
+        .fetch_all(pool)
+        .await?
     };
 
     let posts = {
@@ -521,7 +537,11 @@ async fn make_post_for_index(
 
             granted_info_posts.push(GrantedInfoPost::new(
                 post,
-                post_raw.comment_count,
+                comment_count_raw
+                    .iter()
+                    .find(|c| c.post_id == post_raw.post_id)
+                    .map(|c| c.comment_count)
+                    .unwrap_or_default(),
                 comments,
                 user,
                 csrf_token.clone(),
