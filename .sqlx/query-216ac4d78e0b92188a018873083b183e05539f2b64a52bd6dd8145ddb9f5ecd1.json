@@ -1,0 +1,36 @@
+{
+  "db_name": "MySQL",
+  "query": "SELECT post_id, COUNT(*) AS comment_count\n            FROM comments\n            WHERE post_id IN (?)\n            GROUP BY post_id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "post_id",
+        "type_info": {
+          "type": "Long",
+          "flags": "NOT_NULL | MULTIPLE_KEY | NO_DEFAULT_VALUE",
+          "char_set": 63,
+          "max_size": 11
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "comment_count",
+        "type_info": {
+          "type": "LongLong",
+          "flags": "NOT_NULL | BINARY",
+          "char_set": 63,
+          "max_size": 21
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "216ac4d78e0b92188a018873083b183e05539f2b64a52bd6dd8145ddb9f5ecd1"
+}

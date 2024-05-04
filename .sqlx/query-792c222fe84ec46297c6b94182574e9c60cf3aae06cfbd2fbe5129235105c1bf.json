@@ -1,6 +1,6 @@
 {
   "db_name": "MySQL",
-  "query": "SELECT p.id AS post_id, p.user_id AS user_id, p.mime, p.body, p.created_at AS post_created_at, u.account_name, u.created_at AS user_created_at, COUNT(c.comment) AS comment_count\n            FROM posts as p\n                JOIN users as u ON p.user_id = u.id\n                JOIN comments as c ON p.id = c.post_id\n            WHERE u.del_flg = 0\n            GROUP BY p.id, p.user_id, p.mime, p.body, p.created_at, u.account_name\n            ORDER BY p.created_at DESC\n            LIMIT ?",
+  "query": "SELECT p.id AS post_id, p.user_id AS user_id, p.mime, p.body, p.created_at AS post_created_at, u.account_name, u.created_at AS user_created_at\n            FROM posts as p\n                JOIN users as u ON p.user_id = u.id\n            WHERE u.del_flg = 0\n            ORDER BY p.created_at DESC\n            LIMIT ?",
   "describe": {
     "columns": [
       {
@@ -72,16 +72,6 @@
           "char_set": 63,
           "max_size": 19
         }
-      },
-      {
-        "ordinal": 7,
-        "name": "comment_count",
-        "type_info": {
-          "type": "LongLong",
-          "flags": "NOT_NULL | BINARY",
-          "char_set": 63,
-          "max_size": 21
-        }
       }
     ],
     "parameters": {
@@ -94,9 +84,8 @@
       false,
       false,
       false,
-      false,
       false
     ]
   },
-  "hash": "1e2103af7bf22a226aeec8ed54bb444094588c734369a714caa6cf9d3b5e1e5a"
+  "hash": "792c222fe84ec46297c6b94182574e9c60cf3aae06cfbd2fbe5129235105c1bf"
 }
