@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::path::Path;
 use std::{env, io, time::Duration};
 
 use actix_cors::Cors;
@@ -32,11 +33,14 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_json::Map;
 use sqlx::{MySql, Pool};
+use tokio::fs::File;
+use tokio::io::AsyncWriteExt;
 
 const POSTS_PER_PAGE: usize = 20;
 const UPLOAD_LIMIT: usize = 10 * 1024 * 1024;
 const SESSION_KEY_LENGTH: u32 = 32;
 const SESSION_TTL: i64 = 60 * 60 * 24 * 30;
+const IMAGE_FILE_PATH: &'static str = "../public/image";
 static AGGREGATION_LOWER_CASE_NUM: Lazy<Vec<char>> = Lazy::new(|| {
     let mut az09 = Vec::new();
     for az in 'a' as u32..('z' as u32 + 1) {
@@ -1268,10 +1272,9 @@ async fn post_index(
     }
 
     let pid = match sqlx::query!(
-        "INSERT INTO `posts` (`user_id`, `mime`, `imgdata`, `body`) VALUES (?,?,?,?)",
+        "INSERT INTO `posts` (`user_id`, `mime`, `imgdata`, `body`) VALUES (?, ?, b'0', ?)",
         me.id,
         &mime_,
-        &file,
         &body
     )
     .execute(pool.as_ref())
@@ -1279,9 +1282,32 @@ async fn post_index(
     {
         Ok(result) => result.last_insert_id(),
         Err(e) => {
-            return Ok(HttpResponse::Ok().body(e.to_string()));
+            return Ok(HttpResponse::InternalServerError().body(e.to_string()));
         }
     };
+
+    {
+        let ext = match mime_.as_str() {
+            "image/jpeg" => "jpg",
+            "image/png" => "png",
+            "image/gif" => "gif",
+            _ => "",
+        };
+        let mut image_file = File::options()
+            .create(true)
+            .truncate(true)
+            .write(true)
+            .append(false)
+            .open(format!(
+                "{}/{}.{}",
+                IMAGE_FILE_PATH,
+                pid,
+                ext
+            ))
+            .await?;
+        image_file.write_all(&file).await?;
+        image_file.flush().await?;
+    }
 
     Ok(HttpResponse::Found()
         .insert_header((header::LOCATION, format!("/posts/{}", pid)))
@@ -1295,7 +1321,33 @@ async fn get_image(
 ) -> Result<HttpResponse> {
     let (pid, ext) = path.into_inner();
 
-    let post = match sqlx::query!("SELECT mime, imgdata FROM `posts` WHERE `id` = ?", pid)
+    // DBからファイルシステムへの移行処理
+    let image_file_path = format!("{}/{}.{}", IMAGE_FILE_PATH, pid, ext);
+    if !Path::new(&image_file_path).exists() {
+        let image_data = match sqlx::query!(r#"SELECT imgdata FROM `posts` WHERE `id` = ?"#, pid)
+            .fetch_one(pool.as_ref())
+            .await
+        {
+            Ok(f) => f.imgdata,
+            Err(e) => {
+                return Ok(HttpResponse::Ok().body(e.to_string()));
+            }
+        };
+
+        {
+            let mut image_file = File::options()
+                .create(true)
+                .truncate(true)
+                .write(true)
+                .append(false)
+                .open(&image_file_path)
+                .await?;
+            image_file.write_all(&image_data).await?;
+            image_file.flush().await?;
+        }
+    }
+
+    let post = match sqlx::query!(r#"SELECT mime, imgdata FROM `posts` WHERE `id` = ?"#, pid)
         .fetch_optional(pool.as_ref())
         .await
     {
@@ -1315,7 +1367,6 @@ async fn get_image(
 
     Ok(HttpResponse::Ok()
         .content_type(content_type)
-        .insert_header((header::CACHE_CONTROL, "public, max-age=31536000"))
         .body(post.imgdata))
 }
 
