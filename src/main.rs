@@ -448,7 +448,7 @@ async fn make_post_for_index(
             WHERE u.del_flg = 0
             ORDER BY p.created_at DESC
             LIMIT ?"#,
-        POSTS_PER_PAGE as u32 + 5
+        POSTS_PER_PAGE as u32
     ).fetch_all(pool).await?;
 
     let comments_raw = {
