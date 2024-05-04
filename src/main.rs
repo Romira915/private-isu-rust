@@ -450,29 +450,61 @@ struct PostRaw {
 async fn make_post2(
     post_raws: Vec<PostRaw>,
     csrf_token: String,
+    all_comments: bool,
     pool: &Pool<MySql>,
 ) -> anyhow::Result<Vec<GrantedInfoPost>> {
     let comments_raw = {
+        struct CommentRaw {
+            id: i32,
+            post_id: i32,
+            user_id: i32,
+            comment: String,
+            comment_created_at: chrono::DateTime<Utc>,
+            account_name: String,
+            user_created_at: chrono::DateTime<Utc>,
+        }
         let post_ids = post_raws.iter().map(|p| p.post_id).collect::<Vec<i32>>();
 
-        sqlx::query!(
-        r#"SELECT ranked_comments.id,
-                   ranked_comments.post_id,
-                   ranked_comments.user_id,
-                   ranked_comments.comment,
-                   ranked_comments.created_at AS comment_created_at,
-                   u.account_name,
-                   u.created_at AS user_created_at
-            FROM (SELECT *,
-                         ROW_NUMBER() OVER (PARTITION BY post_id ORDER BY created_at DESC) AS row_num
-                  FROM comments
-                  WHERE post_id IN (?)) AS ranked_comments
-                     JOIN users AS u ON ranked_comments.user_id = u.id
-            WHERE row_num <= 3
-              AND u.del_flg = 0
-            ORDER BY post_id, comment_created_at DESC"#,
-        post_ids.iter().map(|i| i.to_string()).collect::<Vec<String>>().join(", ")
-        ).fetch_all(pool).await?
+        if all_comments {
+            sqlx::query_as!(
+                CommentRaw,
+                r#"SELECT ranked_comments.id,
+                           ranked_comments.post_id,
+                           ranked_comments.user_id,
+                           ranked_comments.comment,
+                           ranked_comments.created_at AS comment_created_at,
+                           u.account_name,
+                           u.created_at AS user_created_at
+                    FROM (SELECT *,
+                                 ROW_NUMBER() OVER (PARTITION BY post_id ORDER BY created_at DESC) AS row_num
+                          FROM comments
+                          WHERE post_id IN (?)) AS ranked_comments
+                             JOIN users AS u ON ranked_comments.user_id = u.id
+                    WHERE u.del_flg = 0
+                    ORDER BY post_id, comment_created_at DESC"#,
+                post_ids.iter().map(|i| i.to_string()).collect::<Vec<String>>().join(", ")
+            ).fetch_all(pool).await?
+        } else {
+            sqlx::query_as!(
+                CommentRaw,
+                r#"SELECT ranked_comments.id,
+                           ranked_comments.post_id,
+                           ranked_comments.user_id,
+                           ranked_comments.comment,
+                           ranked_comments.created_at AS comment_created_at,
+                           u.account_name,
+                           u.created_at AS user_created_at
+                    FROM (SELECT *,
+                                 ROW_NUMBER() OVER (PARTITION BY post_id ORDER BY created_at DESC) AS row_num
+                          FROM comments
+                          WHERE post_id IN (?)) AS ranked_comments
+                             JOIN users AS u ON ranked_comments.user_id = u.id
+                    WHERE row_num <= 3
+                      AND u.del_flg = 0
+                    ORDER BY post_id, comment_created_at DESC"#,
+                post_ids.iter().map(|i| i.to_string()).collect::<Vec<String>>().join(", ")
+            ).fetch_all(pool).await?
+        }
     };
 
     let comment_count_raw = {
@@ -824,7 +856,7 @@ async fn get_index(
         }
     };
 
-    let posts = match make_post2(post_raws, csrf_token, pool.as_ref()).await {
+    let posts = match make_post2(post_raws, csrf_token, false, pool.as_ref()).await {
         Ok(p) => p,
         Err(e) => {
             return Ok(HttpResponse::InternalServerError().body(e.to_string()));
@@ -899,6 +931,7 @@ async fn get_account_name(
     let posts = match make_post2(
         post_raws,
         get_csrf_token(&session).unwrap_or_default(),
+        false,
         pool.as_ref(),
     )
     .await
@@ -1044,6 +1077,7 @@ async fn get_posts(
     let posts = match make_post2(
         post_raws,
         get_csrf_token(&session).unwrap_or_default(),
+        false,
         pool.as_ref(),
     )
     .await
@@ -1080,9 +1114,21 @@ async fn get_posts_id(
     pool: Data<Pool<MySql>>,
     handlebars: Data<Handlebars<'_>>,
 ) -> Result<HttpResponse> {
-    let results = match sqlx::query_as!(
-        Post,
-        "SELECT `id`, `user_id`, `body`, `mime`, `created_at` FROM `posts` WHERE `id` = ?",
+    let post_raws = match sqlx::query_as!(
+        PostRaw,
+        r#"SELECT p.id         AS post_id,
+                   p.user_id    AS user_id,
+                   p.mime,
+                   p.body,
+                   p.created_at AS post_created_at,
+                   u.account_name,
+                   u.created_at AS user_created_at
+            FROM posts as p
+                     JOIN users as u ON p.user_id = u.id
+            WHERE p.id = ?
+              AND u.del_flg = 0
+            ORDER BY p.created_at DESC
+            LIMIT 20"#,
         pid.0
     )
     .fetch_all(pool.as_ref())
@@ -1094,8 +1140,8 @@ async fn get_posts_id(
         }
     };
 
-    let posts = match make_post(
-        results,
+    let posts = match make_post2(
+        post_raws,
         get_csrf_token(&session).unwrap_or_default(),
         true,
         pool.as_ref(),
