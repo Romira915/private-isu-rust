@@ -37,3 +37,4 @@ serde_qs = "0.13.0"
 mime = "0.3.17"
 memcache = "0.17.2"
 tokio = { version = "1.37.0", features = ["fs"] }
+sha2 = "0.10.8"
