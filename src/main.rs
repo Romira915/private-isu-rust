@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::path::Path;
 use std::{env, io, time::Duration};
+use std::fmt::Write;
 
 use actix_cors::Cors;
 use actix_files::Files;
@@ -32,6 +33,7 @@ use rand::{
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_json::Map;
+use sha2::{Digest, Sha512};
 use sqlx::{MySql, Pool};
 use tokio::fs::File;
 use tokio::io::AsyncWriteExt;
@@ -307,12 +309,17 @@ fn _escapeshellarg(arg: &str) -> String {
 }
 
 fn digest(src: &str) -> anyhow::Result<String> {
-    let output = duct_sh::sh(r#"printf "%s" "$SRC" | openssl dgst -sha512 | sed 's/^.*= //'"#)
-        .env("SRC", src)
-        .read()
-        .context("Failed to cmd")?;
+    let mut hasher = Sha512::new();
+    hasher.update(src.as_bytes());
+    let output = hasher
+        .finalize()
+        .iter()
+        .fold(String::new(), |mut output, b| {
+            let _ = write!(output, "{b:02x}");
+            output
+        });
 
-    Ok(output.trim_end_matches('\n').to_string())
+    Ok(output)
 }
 
 fn validate_user(account_name: &str, password: &str) -> bool {
@@ -1298,12 +1305,7 @@ async fn post_index(
             .truncate(true)
             .write(true)
             .append(false)
-            .open(format!(
-                "{}/{}.{}",
-                IMAGE_FILE_PATH,
-                pid,
-                ext
-            ))
+            .open(format!("{}/{}.{}", IMAGE_FILE_PATH, pid, ext))
             .await?;
         image_file.write_all(&file).await?;
         image_file.flush().await?;
