@@ -440,16 +440,44 @@ async fn make_post(
 async fn make_post_for_index(
     csrf_token: String,
     pool: &Pool<MySql>,
+    user_id: Option<i32>,
 ) -> anyhow::Result<Vec<GrantedInfoPost>> {
-    let posts_raw = sqlx::query!(
-        r#"SELECT p.id AS post_id, p.user_id AS user_id, p.mime, p.body, p.created_at AS post_created_at, u.account_name, u.created_at AS user_created_at
-            FROM posts as p
-                JOIN users as u ON p.user_id = u.id
-            WHERE u.del_flg = 0
-            ORDER BY p.created_at DESC
-            LIMIT ?"#,
-        POSTS_PER_PAGE as u32
-    ).fetch_all(pool).await?;
+    struct PostRaw {
+        post_id: i32,
+        user_id: i32,
+        mime: String,
+        body: String,
+        post_created_at: chrono::DateTime<Utc>,
+        account_name: String,
+        user_created_at: chrono::DateTime<Utc>,
+    }
+    let posts_raw = if let Some(user_id) = user_id {
+        sqlx::query_as!(
+            PostRaw,
+            r#"SELECT p.id AS post_id, p.user_id AS user_id, p.mime, p.body, p.created_at AS post_created_at, u.account_name, u.created_at AS user_created_at
+                FROM posts as p
+                    JOIN users as u ON p.user_id = u.id
+                WHERE p.user_id = ?
+                    AND u.del_flg = 0
+                ORDER BY p.created_at DESC
+                LIMIT ?"#,
+            user_id,
+            POSTS_PER_PAGE as u32
+        )
+        .fetch_all(pool)
+        .await?
+    } else {
+        sqlx::query_as!(
+            PostRaw,
+            r#"SELECT p.id AS post_id, p.user_id AS user_id, p.mime, p.body, p.created_at AS post_created_at, u.account_name, u.created_at AS user_created_at
+                FROM posts as p
+                    JOIN users as u ON p.user_id = u.id
+                WHERE u.del_flg = 0
+                ORDER BY p.created_at DESC
+                LIMIT ?"#,
+            POSTS_PER_PAGE as u32
+        ).fetch_all(pool).await?
+    };
 
     let comments_raw = {
         let post_ids = posts_raw.iter().map(|p| p.post_id).collect::<Vec<i32>>();
@@ -807,7 +835,7 @@ async fn get_index(
 
     let csrf_token = get_csrf_token(&session).unwrap_or_default();
 
-    let posts = match make_post_for_index(csrf_token, pool.as_ref()).await {
+    let posts = match make_post_for_index(csrf_token, pool.as_ref(), None).await {
         Ok(p) => p,
         Err(e) => {
             return Ok(HttpResponse::InternalServerError().body(e.to_string()));
@@ -855,28 +883,20 @@ async fn get_account_name(
         Ok(Some(user)) => user,
         Ok(None) => return Ok(HttpResponse::NotFound().finish()),
         Err(e) => {
-            return Ok(HttpResponse::Ok().body(e.to_string()));
+            return Ok(HttpResponse::InternalServerError().body(e.to_string()));
         }
     };
 
-    let results = match sqlx::query_as!(Post,"SELECT `id`, `user_id`, `body`, `mime`, `created_at` FROM `posts` WHERE `user_id` = ? ORDER BY `created_at` DESC",user.id).fetch_all(pool.as_ref()).await {
-        Ok(r) => r,
-        Err(e) => {
-            return Ok(HttpResponse::Ok().body(e.to_string()));
-        }
-    };
-
-    let posts = match make_post(
-        results,
+    let posts = match make_post_for_index(
         get_csrf_token(&session).unwrap_or_default(),
-        false,
         pool.as_ref(),
+        Some(user.id),
     )
     .await
     {
         Ok(p) => p,
         Err(e) => {
-            return Ok(HttpResponse::Ok().body(e.to_string()));
+            return Ok(HttpResponse::InternalServerError().body(e.to_string()));
         }
     };
 

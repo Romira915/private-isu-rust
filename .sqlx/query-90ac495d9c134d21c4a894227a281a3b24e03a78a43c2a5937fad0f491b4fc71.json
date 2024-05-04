@@ -1,6 +1,6 @@
 {
   "db_name": "MySQL",
-  "query": "SELECT p.id AS post_id, p.user_id AS user_id, p.mime, p.body, p.created_at AS post_created_at, u.account_name, u.created_at AS user_created_at\n            FROM posts as p\n                JOIN users as u ON p.user_id = u.id\n            WHERE u.del_flg = 0\n            ORDER BY p.created_at DESC\n            LIMIT ?",
+  "query": "SELECT p.id AS post_id, p.user_id AS user_id, p.mime, p.body, p.created_at AS post_created_at, u.account_name, u.created_at AS user_created_at\n                FROM posts as p\n                    JOIN users as u ON p.user_id = u.id\n                WHERE u.del_flg = 0\n                ORDER BY p.created_at DESC\n                LIMIT ?",
   "describe": {
     "columns": [
       {
@@ -87,5 +87,5 @@
       false
     ]
   },
-  "hash": "792c222fe84ec46297c6b94182574e9c60cf3aae06cfbd2fbe5129235105c1bf"
+  "hash": "90ac495d9c134d21c4a894227a281a3b24e03a78a43c2a5937fad0f491b4fc71"
 }
