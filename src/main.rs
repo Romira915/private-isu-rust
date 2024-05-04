@@ -922,7 +922,7 @@ async fn get_account_name(
     let post_raws = match sqlx::query_as!(
             PostRaw,
             r#"SELECT p.id AS post_id, p.user_id AS user_id, p.mime, p.body, p.created_at AS post_created_at, u.account_name, u.created_at AS user_created_at
-                FROM posts as p
+                FROM posts as p FORCE INDEX (posts_user_id_created_at_idx)
                     JOIN users as u ON p.user_id = u.id
                 WHERE p.user_id = ?
                     AND u.del_flg = 0
