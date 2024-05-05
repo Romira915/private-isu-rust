@@ -392,7 +392,7 @@ struct PostRaw {
     user_created_at: chrono::DateTime<Utc>,
 }
 
-async fn make_post2(
+async fn make_post(
     post_raws: Vec<PostRaw>,
     csrf_token: String,
     all_comments: bool,
@@ -801,7 +801,7 @@ async fn get_index(
         }
     };
 
-    let posts = match make_post2(post_raws, csrf_token, false, pool.as_ref()).await {
+    let posts = match make_post(post_raws, csrf_token, false, pool.as_ref()).await {
         Ok(p) => p,
         Err(e) => {
             return Ok(HttpResponse::InternalServerError().body(e.to_string()));
@@ -873,7 +873,7 @@ async fn get_account_name(
         }
     };
 
-    let posts = match make_post2(
+    let posts = match make_post(
         post_raws,
         get_csrf_token(&session).unwrap_or_default(),
         false,
@@ -1019,7 +1019,7 @@ async fn get_posts(
         }
     };
 
-    let posts = match make_post2(
+    let posts = match make_post(
         post_raws,
         get_csrf_token(&session).unwrap_or_default(),
         false,
@@ -1086,7 +1086,7 @@ async fn get_posts_id(
         return Ok(HttpResponse::NotFound().finish());
     }
 
-    let posts = match make_post2(
+    let posts = match make_post(
         post_raws,
         get_csrf_token(&session).unwrap_or_default(),
         true,
