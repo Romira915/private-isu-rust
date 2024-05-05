@@ -1,7 +1,7 @@
 use std::collections::HashMap;
+use std::fmt::Write;
 use std::path::Path;
 use std::{env, io, time::Duration};
-use std::fmt::Write;
 
 use actix_cors::Cors;
 use actix_files::Files;
@@ -288,9 +288,9 @@ async fn try_login(account_name: &str, password: &str, pool: &Pool<MySql>) -> an
         "SELECT * FROM users WHERE account_name = ? AND del_flg = 0",
         account_name
     )
-        .fetch_optional(pool)
-        .await
-        .context("Failed to query try_login")?;
+    .fetch_optional(pool)
+    .await
+    .context("Failed to query try_login")?;
 
     if let Some(user) = user {
         if calculate_passhash(&user.account_name, password)? == user.passhash {
@@ -351,7 +351,10 @@ async fn get_session_user(session: &Session, pool: &Pool<MySql>) -> anyhow::Resu
         _ => return Ok(None),
     };
 
-    if let Some(user) = session.get::<User>("user").unwrap() {
+    if let Some(user) = session
+        .get::<User>("user")
+        .context("Failed to get_session_user")?
+    {
         return Ok(Some(user));
     }
 
@@ -361,7 +364,9 @@ async fn get_session_user(session: &Session, pool: &Pool<MySql>) -> anyhow::Resu
         .context("Failed to get_session_user")?;
 
     if let Some(user) = &user {
-        session.insert("user", user).unwrap();
+        session
+            .insert("user", user)
+            .context("Failed to get_session_user")?;
     }
 
     Ok(user)
@@ -461,8 +466,8 @@ async fn make_post2(
                 .collect::<Vec<String>>()
                 .join(", ")
         )
-            .fetch_all(pool)
-            .await?
+        .fetch_all(pool)
+        .await?
     };
 
     let posts = {
@@ -704,8 +709,8 @@ async fn post_register(
         "SELECT 1 AS _exists FROM users WHERE `account_name` = ?",
         &params.account_name
     )
-        .fetch_optional(pool.as_ref())
-        .await
+    .fetch_optional(pool.as_ref())
+    .await
     {
         Ok(exists) => exists,
         Err(e) => {
@@ -735,8 +740,8 @@ async fn post_register(
         &params.account_name,
         pass_hash
     )
-        .execute(pool.as_ref())
-        .await
+    .execute(pool.as_ref())
+    .await
     {
         Ok(r) => r.last_insert_id(),
         Err(e) => {
@@ -826,7 +831,7 @@ async fn get_index(
 
 #[get("/@{account_name}")]
 async fn get_account_name(
-    path: web::Path<(String, )>,
+    path: web::Path<(String,)>,
     session: Session,
     pool: Data<Pool<MySql>>,
     handlebars: Data<Handlebars<'_>>,
@@ -838,8 +843,8 @@ async fn get_account_name(
         "SELECT * FROM `users` WHERE `account_name` = ? AND `del_flg` = 0",
         account_name
     )
-        .fetch_optional(pool.as_ref())
-        .await
+    .fetch_optional(pool.as_ref())
+    .await
     {
         Ok(Some(user)) => user,
         Ok(None) => return Ok(HttpResponse::NotFound().finish()),
@@ -874,7 +879,7 @@ async fn get_account_name(
         false,
         pool.as_ref(),
     )
-        .await
+    .await
     {
         Ok(p) => p,
         Err(e) => {
@@ -886,8 +891,8 @@ async fn get_account_name(
         "SELECT COUNT(*) AS count FROM `comments` WHERE `user_id` = ?",
         user.id
     )
-        .fetch_one(pool.as_ref())
-        .await
+    .fetch_one(pool.as_ref())
+    .await
     {
         Ok(r) => r.count,
         Err(e) => {
@@ -1005,8 +1010,8 @@ async fn get_posts(
             LIMIT 20"#,
         &t.to_rfc3339()
     )
-        .fetch_all(pool.as_ref())
-        .await
+    .fetch_all(pool.as_ref())
+    .await
     {
         Ok(r) => r,
         Err(e) => {
@@ -1020,7 +1025,7 @@ async fn get_posts(
         false,
         pool.as_ref(),
     )
-        .await
+    .await
     {
         Ok(p) => p,
         Err(e) => {
@@ -1046,7 +1051,7 @@ async fn get_posts(
 
 #[get("/posts/{id}")]
 async fn get_posts_id(
-    pid: web::Path<(u64, )>,
+    pid: web::Path<(u64,)>,
     session: Session,
     pool: Data<Pool<MySql>>,
     handlebars: Data<Handlebars<'_>>,
@@ -1068,8 +1073,8 @@ async fn get_posts_id(
             LIMIT 20"#,
         pid.0
     )
-        .fetch_all(pool.as_ref())
-        .await
+    .fetch_all(pool.as_ref())
+    .await
     {
         Ok(r) => r,
         Err(e) => {
@@ -1087,7 +1092,7 @@ async fn get_posts_id(
         true,
         pool.as_ref(),
     )
-        .await
+    .await
     {
         Ok(p) => p,
         Err(e) => {
@@ -1150,13 +1155,13 @@ async fn post_index(
                 let content_type = field.content_type();
                 match content_type {
                     Some(mime)
-                    if mime == &mime::IMAGE_JPEG
-                        || mime == &mime::IMAGE_PNG
-                        || mime == &mime::IMAGE_GIF =>
-                        {
-                            mime_ = mime.to_string();
-                            file = field_to_vec(&mut field).await.unwrap_or_default();
-                        }
+                        if mime == &mime::IMAGE_JPEG
+                            || mime == &mime::IMAGE_PNG
+                            || mime == &mime::IMAGE_GIF =>
+                    {
+                        mime_ = mime.to_string();
+                        file = field_to_vec(&mut field).await.unwrap_or_default();
+                    }
                     Some(mime) if mime.type_() == mime::IMAGE => {
                         return match session
                             .insert("notice", "投稿できる画像形式はjpgとpngとgifだけです")
@@ -1210,8 +1215,8 @@ async fn post_index(
         &mime_,
         &body
     )
-        .execute(pool.as_ref())
-        .await
+    .execute(pool.as_ref())
+    .await
     {
         Ok(result) => result.last_insert_id(),
         Err(e) => {
@@ -1334,8 +1339,8 @@ async fn post_comment(
         me.id,
         &params.comment
     )
-        .execute(pool.as_ref())
-        .await
+    .execute(pool.as_ref())
+    .await
     {
         return Ok(HttpResponse::Ok().body(e.to_string()));
     }
@@ -1373,8 +1378,8 @@ async fn get_admin_banned(
         User,
         "SELECT * FROM `users` WHERE `authority` = 0 AND `del_flg` = 0 ORDER BY `created_at` DESC"
     )
-        .fetch_all(pool.as_ref())
-        .await
+    .fetch_all(pool.as_ref())
+    .await
     {
         Ok(users) => users,
         Err(e) => {
@@ -1521,14 +1526,14 @@ async fn main() -> io::Result<()> {
                     MemcachedSessionStore::new(memcached_address).unwrap(),
                     private_key.clone(),
                 )
-                    // NOTE: http://host.docker.internalで接続できる必要があるのでfalse
-                    .cookie_secure(false)
-                    .session_lifecycle(
-                        PersistentSession::default()
-                            .session_ttl(actix_web::cookie::time::Duration::seconds(SESSION_TTL)),
-                    )
-                    .cookie_name("isuconp-rust.session".to_string())
-                    .build(),
+                // NOTE: http://host.docker.internalで接続できる必要があるのでfalse
+                .cookie_secure(false)
+                .session_lifecycle(
+                    PersistentSession::default()
+                        .session_ttl(actix_web::cookie::time::Duration::seconds(SESSION_TTL)),
+                )
+                .cookie_name("isuconp-rust.session".to_string())
+                .build(),
             )
             .app_data(Data::new(db.clone()))
             .app_data(Data::new(handlebars))
@@ -1549,8 +1554,8 @@ async fn main() -> io::Result<()> {
             .service(get_account_name)
             .service(Files::new("/", "../public"))
     })
-        .workers(4)
-        .bind(("0.0.0.0", 8080))?
-        .run()
-        .await
+    .workers(4)
+    .bind(("0.0.0.0", 8080))?
+    .run()
+    .await
 }
