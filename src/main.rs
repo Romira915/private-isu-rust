@@ -351,10 +351,18 @@ async fn get_session_user(session: &Session, pool: &Pool<MySql>) -> anyhow::Resu
         _ => return Ok(None),
     };
 
+    if let Some(user) = session.get::<User>("user").unwrap() {
+        return Ok(Some(user));
+    }
+
     let user = sqlx::query_as!(User, "SELECT * FROM `users` WHERE `id` = ?", &uid)
         .fetch_optional(pool)
         .await
         .context("Failed to get_session_user")?;
+
+    if let Some(user) = &user {
+        session.insert("user", user).unwrap();
+    }
 
     Ok(user)
 }
@@ -1069,6 +1077,10 @@ async fn get_posts_id(
         }
     };
 
+    if post_raws.is_empty() {
+        return Ok(HttpResponse::NotFound().finish());
+    }
+
     let posts = match make_post2(
         post_raws,
         get_csrf_token(&session).unwrap_or_default(),
@@ -1082,10 +1094,6 @@ async fn get_posts_id(
             return Ok(HttpResponse::Ok().body(e.to_string()));
         }
     };
-
-    if posts.is_empty() {
-        return Ok(HttpResponse::NotFound().finish());
-    }
 
     let p = &posts[0];
 
@@ -1321,7 +1329,7 @@ async fn post_comment(
     }
 
     if let Err(e) = sqlx::query!(
-        "INSERT INTO `comments` (`post_id`, `user_id`, `comment`) VALUES (?,?,?)",
+        "INSERT INTO `comments` (`post_id`, `user_id`, `comment`) VALUES (?, ?, ?)",
         params.post_id,
         me.id,
         &params.comment
