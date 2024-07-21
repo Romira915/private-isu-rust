@@ -8,6 +8,7 @@ use actix_multipart::{Field, Multipart};
 use actix_session::config::PersistentSession;
 use actix_session::storage::{LoadError, SaveError, SessionKey, SessionStore, UpdateError};
 use actix_session::{Session, SessionMiddleware};
+use actix_web::http::header::HeaderMap;
 use actix_web::{
     get,
     http::header,
@@ -449,7 +450,7 @@ handlebars_helper!(image_url: |p: GrantedInfoPost| {
 });
 
 handlebars_helper!(date_time_format: |create_at: DateTime<Utc>| {
-    create_at.format("%Y-%m-%dT%H:%M:%S-07:00").to_string()
+    create_at.format("%Y-%m-%dT%H:%M:%S+00:00").to_string()
 });
 
 fn is_login(u: Option<&User>) -> bool {
@@ -911,7 +912,10 @@ async fn get_posts(
         handlebars.render("post", &map).unwrap()
     };
 
-    Ok(HttpResponse::Ok().body(body))
+    Ok(HttpResponse::Ok()
+        .insert_header((header::CONTENT_TYPE, "text/html; charset=utf-8"))
+        .insert_header((header::TRANSFER_ENCODING, "chunked"))
+        .body(body))
 }
 
 #[get("/posts/{id}")]
@@ -1338,7 +1342,7 @@ async fn main() -> io::Result<()> {
                     PersistentSession::default()
                         .session_ttl(actix_web::cookie::time::Duration::seconds(SESSION_TTL)),
                 )
-                    .cookie_name("isuconp-rust.session".to_string())
+                .cookie_name("isuconp-rust.session".to_string())
                 .build(),
             )
             .app_data(Data::new(db.clone()))
